@@ -1,36 +1,49 @@
 import os
-from flask import Flask, request
+import asyncio
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes
+
+load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 10000))
 
-app = Flask(__name__)
+if not TOKEN:
+    raise ValueError("BOT_TOKEN не найден")
 
-telegram_app = ApplicationBuilder().token(TOKEN).build()
+app = FastAPI()
+telegram_app = Application.builder().token(TOKEN).build()
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает через webhook 🚀")
 
+
 telegram_app.add_handler(CommandHandler("start", start))
 
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put_nowait(update)
-    return "ok"
 
-@app.route("/")
-def home():
-    return "Bot is running"
+@app.on_event("startup")
+async def on_startup():
+    await telegram_app.initialize()
+    await telegram_app.start()
 
-def main():
-    telegram_app.initialize()
-    telegram_app.start()
 
-    PORT = int(os.environ.get("PORT", 10000))
+@app.on_event("shutdown")
+async def on_shutdown():
+    await telegram_app.stop()
+    await telegram_app.shutdown()
 
-    app.run(host="0.0.0.0", port=PORT)
 
-if __name__ == "__main__":
-    main()
+@app.get("/")
+async def healthcheck():
+    return {"status": "ok"}
+
+
+@app.post(f"/{TOKEN}")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+    return {"ok": True}
