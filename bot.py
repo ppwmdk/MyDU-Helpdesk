@@ -161,6 +161,7 @@ async def set_commands(application: Application):
         BotCommand("support", "Связаться с поддержкой"),
         BotCommand("report", "Отправить ошибку"),
         BotCommand("my_role", "Показать мою роль"),
+        BotCommand("my_reports", "Мои заявки"),
     ]
 
     staff_commands = [
@@ -203,6 +204,35 @@ async def set_commands(application: Application):
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     print(f"Ошибка: {context.error}")
 
+async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, created_at, module, status
+                FROM reports
+                WHERE user_id = %s
+                ORDER BY id DESC
+                LIMIT 20
+            """, (user.id,))
+            rows = cursor.fetchall()
+
+    if not rows:
+        await update.message.reply_text("У вас пока нет отправленных заявок.")
+        return
+
+    lines = ["📋 Ваши заявки:\n"]
+    for row in rows:
+        lines.append(
+            f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Модуль: {row['module']}\n"
+            f"Статус: {row['status']}\n"
+        )
+
+    await update.message.reply_text("\n".join(lines))
 
 # =========================
 # TEXT BUILDERS
@@ -1179,6 +1209,7 @@ telegram_app.add_handler(CommandHandler("set_status", set_status))
 telegram_app.add_handler(CommandHandler("take_report", take_report))
 telegram_app.add_handler(CommandHandler("resolve_report", resolve_report))
 telegram_app.add_handler(CommandHandler("export_excel", export_excel))
+telegram_app.add_handler(CommandHandler("my_reports", my_reports))
 
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
