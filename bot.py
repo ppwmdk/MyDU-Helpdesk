@@ -245,6 +245,43 @@ def build_report_text(
     )
 
 
+async def notify_admins_status_change(
+    context: ContextTypes.DEFAULT_TYPE,
+    report_id: int,
+    module: str | None,
+    new_status: str,
+    actor,
+):
+    if new_status == "В работе":
+        title = "🛠 Заявку взяли в работу"
+    elif new_status == "Решено":
+        title = "✅ Заявку завершили"
+    else:
+        return
+
+    username_text = f"@{actor.username}" if actor and actor.username else "-"
+    actor_name = actor.full_name if actor and actor.full_name else "-"
+    actor_id = actor.id if actor else "-"
+    role = get_role_name(actor.id) if actor else "-"
+
+    text = (
+        f"{title}\n\n"
+        f"📌 Заявка: #{report_id}\n"
+        f"🧩 Модуль: {module if module else '-'}\n"
+        f"📊 Статус: {new_status}\n\n"
+        f"👤 Кто изменил: {actor_name}\n"
+        f"🔐 Роль: {role}\n"
+        f"🆔 Telegram ID: {actor_id}\n"
+        f"🔗 Username: {username_text}"
+    )
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except Exception as e:
+            print(f"Не удалось уведомить админа {admin_id}: {e}")
+
+
 # =========================
 # STUDENT COMMANDS
 # =========================
@@ -679,7 +716,7 @@ async def set_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     with get_conn() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT id FROM reports WHERE id = %s", (report_id,))
+            cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
             report = cursor.fetchone()
 
             if not report:
@@ -694,6 +731,13 @@ async def set_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"Статус заявки #{report_id} изменён на: {new_status}"
+    )
+    await notify_admins_status_change(
+        context=context,
+        report_id=report_id,
+        module=report["module"],
+        new_status=new_status,
+        actor=user,
     )
 
 
@@ -733,6 +777,13 @@ async def take_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
     await update.message.reply_text(f"🛠 Заявка #{report_id} переведена в статус: В работе")
+    await notify_admins_status_change(
+        context=context,
+        report_id=report_id,
+        module=row["module"],
+        new_status="В работе",
+        actor=user,
+    )
 
     if row["user_id"]:
         try:
@@ -785,6 +836,13 @@ async def resolve_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
     await update.message.reply_text(f"✅ Заявка #{report_id} переведена в статус: Решено")
+    await notify_admins_status_change(
+        context=context,
+        report_id=report_id,
+        module=row["module"],
+        new_status="Решено",
+        actor=user,
+    )
 
     if row["user_id"]:
         try:
@@ -909,6 +967,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=build_inline_keyboard(report_id, "В работе")
         )
         await query.message.reply_text(f"🛠 Заявка #{report_id} взята в работу")
+        await notify_admins_status_change(
+            context=context,
+            report_id=report_id,
+            module=row["module"],
+            new_status="В работе",
+            actor=user,
+        )
 
         if row["user_id"]:
             try:
@@ -950,6 +1015,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=build_inline_keyboard(report_id, "Решено")
         )
         await query.message.reply_text(f"✅ Заявка #{report_id} решена")
+        await notify_admins_status_change(
+            context=context,
+            report_id=report_id,
+            module=row["module"],
+            new_status="Решено",
+            actor=user,
+        )
 
         if row["user_id"]:
             try:
@@ -1150,7 +1222,7 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
 
     with get_conn() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT id FROM reports WHERE id = %s", (report_id,))
+            cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
             report = cursor.fetchone()
 
             if not report:
@@ -1167,6 +1239,13 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("status_report_id", None)
     await update.message.reply_text(
         f"Статус заявки #{report_id} изменён на: {new_status}"
+    )
+    await notify_admins_status_change(
+        context=context,
+        report_id=report_id,
+        module=report["module"],
+        new_status=new_status,
+        actor=update.effective_user,
     )
     return ConversationHandler.END
 
