@@ -1292,4 +1292,4 @@ async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
-    return {"ok": True}S
+    return {"ok": True}
