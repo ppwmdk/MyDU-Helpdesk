@@ -92,6 +92,14 @@ def init_db():
                     status TEXT NOT NULL DEFAULT 'Новая'
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS report_messages (
+                    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                    chat_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    PRIMARY KEY (report_id, chat_id, message_id)
+                )
+            """)
         conn.commit()
 
 
@@ -123,7 +131,8 @@ def get_role_name(user_id: int) -> str:
 # =========================
 def get_staff_keyboard(user_id: int):
     keyboard = [
-        ["Последние заявки", "Поиск по ID"],
+        ["Новые заявки", "Последние заявки"],
+        ["Поиск по ID"],
         ["Фильтр по модулю", "Изменить статус"],
         ["Взять в работу", "Отметить решённой"],
     ]
@@ -182,6 +191,7 @@ async def set_commands(application: Application):
         BotCommand("my_role", "Показать мою роль"),
         BotCommand("my_reports", "Мои заявки"),
         BotCommand("staff_menu", "Открыть меню сотрудника"),
+        BotCommand("new_reports", "Новые заявки"),
         BotCommand("list_reports", "Последние заявки"),
         BotCommand("report_by_id", "Полная заявка по ID"),
         BotCommand("filter_module", "Фильтр по модулю"),
@@ -243,6 +253,57 @@ def build_report_text(
         f"🆔 Telegram ID: {user_id if user_id else '-'}\n"
         f"🔗 Username: {username_text}"
     )
+
+
+def save_report_message(report_id: int, chat_id: int, message_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO report_messages (report_id, chat_id, message_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (report_id, chat_id, message_id)
+            )
+        conn.commit()
+
+
+async def sync_report_keyboards(
+    context: ContextTypes.DEFAULT_TYPE,
+    report_id: int,
+    status: str,
+    skip_chat_id: int | None = None,
+    skip_message_id: int | None = None,
+):
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT chat_id, message_id
+                FROM report_messages
+                WHERE report_id = %s
+                """,
+                (report_id,)
+            )
+            rows = cursor.fetchall()
+
+    keyboard = build_inline_keyboard(report_id, status)
+    for row in rows:
+        if row["chat_id"] == skip_chat_id and row["message_id"] == skip_message_id:
+            continue
+
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=row["chat_id"],
+                message_id=row["message_id"],
+                reply_markup=keyboard,
+            )
+        except Exception as e:
+            print(
+                f"Не удалось обновить кнопки заявки #{report_id} "
+                f"для чата {row['chat_id']}, сообщения {row['message_id']}: {e}"
+            )
 
 
 async def notify_admins_status_change(
@@ -497,18 +558,19 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for staff_id in recipients:
         try:
             if screenshot_file_id:
-                await context.bot.send_photo(
+                staff_message = await context.bot.send_photo(
                     chat_id=staff_id,
                     photo=screenshot_file_id,
                     caption=report_text,
                     reply_markup=keyboard
                 )
             else:
-                await context.bot.send_message(
+                staff_message = await context.bot.send_message(
                     chat_id=staff_id,
                     text=report_text,
                     reply_markup=keyboard
                 )
+            save_report_message(report_id, staff_id, staff_message.message_id)
         except Exception as e:
             print(f"Ошибка отправки сотруднику {staff_id}: {e}")
 
@@ -587,6 +649,43 @@ async def list_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text("\n".join(lines))
+
+
+async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or not is_staff(user.id):
+        await update.message.reply_text("У вас нет доступа к этой команде.")
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, created_at, name, group_name, module, description
+                FROM reports
+                WHERE status = %s
+                ORDER BY id DESC
+            """, ("Новая",))
+            rows = cursor.fetchall()
+
+    if not rows:
+        await update.message.reply_text("Новых заявок нет. Все заявки уже взяты в работу или закрыты.")
+        return
+
+    await update.message.reply_text("Новые заявки, ещё не взятые в работу:")
+
+    for row in rows:
+        text = (
+            f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"{row['name']} | {row['group_name']}\n"
+            f"Модуль: {row['module']}\n"
+            f"Описание: {row['description']}"
+        )
+
+        report_message = await update.message.reply_text(
+            text,
+            reply_markup=build_inline_keyboard(row["id"], "Новая")
+        )
+        save_report_message(row["id"], report_message.chat_id, report_message.message_id)
 
 
 async def send_full_report(update: Update, context: ContextTypes.DEFAULT_TYPE, report_id: int):
@@ -732,6 +831,7 @@ async def set_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Статус заявки #{report_id} изменён на: {new_status}"
     )
+    await sync_report_keyboards(context, report_id, new_status)
     await notify_admins_status_change(
         context=context,
         report_id=report_id,
@@ -777,6 +877,7 @@ async def take_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
     await update.message.reply_text(f"🛠 Заявка #{report_id} переведена в статус: В работе")
+    await sync_report_keyboards(context, report_id, "В работе")
     await notify_admins_status_change(
         context=context,
         report_id=report_id,
@@ -836,6 +937,7 @@ async def resolve_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
     await update.message.reply_text(f"✅ Заявка #{report_id} переведена в статус: Решено")
+    await sync_report_keyboards(context, report_id, "Решено")
     await notify_admins_status_change(
         context=context,
         report_id=report_id,
@@ -943,6 +1045,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("take_"):
         report_id = int(data.split("_")[1])
+        save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
         with get_conn() as conn:
             with conn.cursor() as cursor:
@@ -965,6 +1068,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_reply_markup(
             reply_markup=build_inline_keyboard(report_id, "В работе")
+        )
+        await sync_report_keyboards(
+            context,
+            report_id,
+            "В работе",
+            skip_chat_id=query.message.chat_id,
+            skip_message_id=query.message.message_id,
         )
         await query.message.reply_text(f"🛠 Заявка #{report_id} взята в работу")
         await notify_admins_status_change(
@@ -991,6 +1101,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("done_"):
         report_id = int(data.split("_")[1])
+        save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
         with get_conn() as conn:
             with conn.cursor() as cursor:
@@ -1013,6 +1124,13 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_reply_markup(
             reply_markup=build_inline_keyboard(report_id, "Решено")
+        )
+        await sync_report_keyboards(
+            context,
+            report_id,
+            "Решено",
+            skip_chat_id=query.message.chat_id,
+            skip_message_id=query.message.message_id,
         )
         await query.message.reply_text(f"✅ Заявка #{report_id} решена")
         await notify_admins_status_change(
@@ -1118,6 +1236,10 @@ async def staff_button_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     text = update.message.text.strip()
+
+    if text == "Новые заявки":
+        await new_reports(update, context)
+        return
 
     if text == "Последние заявки":
         await list_reports(update, context)
@@ -1240,6 +1362,7 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(
         f"Статус заявки #{report_id} изменён на: {new_status}"
     )
+    await sync_report_keyboards(context, report_id, new_status)
     await notify_admins_status_change(
         context=context,
         report_id=report_id,
@@ -1321,6 +1444,7 @@ telegram_app.add_handler(CommandHandler("support", support))
 telegram_app.add_handler(CommandHandler("my_role", my_role))
 telegram_app.add_handler(CommandHandler("my_reports", my_reports))
 telegram_app.add_handler(CommandHandler("staff_menu", staff_menu))
+telegram_app.add_handler(CommandHandler("new_reports", new_reports))
 telegram_app.add_handler(CommandHandler("list_reports", list_reports))
 telegram_app.add_handler(CommandHandler("report_by_id", report_by_id))
 telegram_app.add_handler(CommandHandler("filter_module", filter_module))
@@ -1333,6 +1457,7 @@ telegram_app.add_handler(CommandHandler("cancel", cancel))
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
 
+telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Последние заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Выгрузить Excel$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Скрыть меню$"), staff_button_router))
