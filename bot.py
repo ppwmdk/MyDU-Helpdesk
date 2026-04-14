@@ -44,6 +44,9 @@ ADMIN_IDS = {
 DEVELOPER_IDS = {
     int(x.strip()) for x in os.getenv("DEVELOPER_IDS", "").split(",") if x.strip()
 }
+SUPER_ADMIN_IDS = {
+    123456789  
+}
 
 NAME, GROUP, MODULE, DESCRIPTION, SCREENSHOT = range(5)
 STAFF_REPLY_TEXT = 200
@@ -983,20 +986,26 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         try:
+         for admin_id in SUPER_ADMIN_IDS:
+        try:
             await context.bot.send_message(
-                chat_id=row["user_id"],
+                chat_id=admin_id,
                 text=(
-                    f"📩 Сообщение по вашей заявке #{report_id}\n\n"
-                    f"{update.message.text}"
+                    f"📩 Сотрудник ответил студенту\n\n"
+                    f"👤 Отправитель: @{update.effective_user.username} "
+                    f"(ID: {update.effective_user.id})\n"
+                    f"📌 Заявка: #{report_id}\n\n"
+                    f"💬 Сообщение:\n{update.message.text}"
                 )
             )
-            await update.message.reply_text("Сообщение студенту отправлено ✅")
         except Exception as e:
-            print(f"Не удалось отправить сообщение студенту: {e}")
-            await update.message.reply_text("Не удалось отправить сообщение студенту.")
+            print(f"Ошибка отправки лога: {e}")
 
-        context.user_data.pop("reply_report_id", None)
+    await update.message.reply_text("Сообщение студенту отправлено ✅")
 
+except Exception as e:
+    print(f"Не удалось отправить сообщение студенту: {e}")
+    await update.message.reply_text("Ошибка отправки")
 
 # =========================
 # STAFF BUTTON ROUTER
