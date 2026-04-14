@@ -628,7 +628,7 @@ async def list_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with get_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT id, created_at, name, group_name, module, status
+                SELECT id, created_at, name, group_name, module, description, status
                 FROM reports
                 ORDER BY id DESC
                 LIMIT 10
@@ -639,16 +639,22 @@ async def list_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Заявок пока нет.")
         return
 
-    lines = ["Последние заявки:\n"]
+    await update.message.reply_text("Последние заявки:")
+
     for row in rows:
-        lines.append(
+        text = (
             f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"{row['name']} | {row['group_name']}\n"
             f"Модуль: {row['module']}\n"
             f"Статус: {row['status']}\n"
+            f"Описание: {row['description']}"
         )
 
-    await update.message.reply_text("\n".join(lines))
+        report_message = await update.message.reply_text(
+            text,
+            reply_markup=build_inline_keyboard(row["id"], row["status"])
+        )
+        save_report_message(row["id"], report_message.chat_id, report_message.message_id)
 
 
 async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
