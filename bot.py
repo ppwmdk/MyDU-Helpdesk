@@ -134,16 +134,24 @@ def get_skip_screenshot_keyboard():
     )
 
 
-def build_inline_keyboard(report_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
+def build_inline_keyboard(report_id: int, status: str = "Новая") -> InlineKeyboardMarkup:
+    rows = []
+
+    if status == "Новая":
+        rows.append([
             InlineKeyboardButton("🛠 В работу", callback_data=f"take_{report_id}"),
             InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
-        ],
-        [
-            InlineKeyboardButton("✉️ Ответить студенту", callback_data=f"reply_{report_id}")
-        ]
+        ])
+    elif status == "В работе":
+        rows.append([
+            InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
+        ])
+
+    rows.append([
+        InlineKeyboardButton("✉️ Ответить студенту", callback_data=f"reply_{report_id}")
     ])
+
+    return InlineKeyboardMarkup(rows)
 
 
 async def set_commands(application: Application):
@@ -401,7 +409,7 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         username=user.username if user else None,
     )
 
-    keyboard = build_inline_keyboard(report_id)
+    keyboard = build_inline_keyboard(report_id, "Новая")
     recipients = ADMIN_IDS.union(DEVELOPER_IDS)
 
     for staff_id in recipients:
@@ -852,7 +860,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             conn.commit()
 
-        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_reply_markup(reply_markup=build_inline_keyboard(report_id, "В работе"))
         await query.message.reply_text(f"🛠 Заявка #{report_id} взята в работу")
 
         if row["user_id"]:
@@ -891,7 +899,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             conn.commit()
 
-        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_reply_markup(reply_markup=build_inline_keyboard(report_id, "Решено"))
         await query.message.reply_text(f"✅ Заявка #{report_id} решена")
 
         if row["user_id"]:
