@@ -163,12 +163,37 @@ async def get_screen(update, context):
         ]
     ])
 
-    for admin_id in ADMIN_IDS:
-        await context.bot.send_message(
-            admin_id,
-            f"Новая заявка #{report_id}",
-            reply_markup=keyboard
-        )
+    created_at_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    username_text = f"@{update.effective_user.username}" if update.effective_user.username else "-"
+
+    report_text = (
+        f"📌 Новая заявка #{report_id}\n\n"
+        f"🕒 Дата: {created_at_text}\n"
+        f"👤 ФИО: {context.user_data['name']}\n"
+        f"🎓 Группа: {context.user_data['group']}\n"
+        f"🧩 Модуль: {context.user_data['module']}\n"
+        f"📝 Описание: {context.user_data['desc']}\n"
+        f"📊 Статус: Новая\n"
+        f"🆔 Telegram ID: {update.effective_user.id}\n"
+        f"🔗 Username: {username_text}"
+    )
+
+    recipients = ADMIN_IDS.union(DEVELOPER_IDS)
+
+    for staff_id in recipients:
+        if photo:
+            await context.bot.send_photo(
+                chat_id=staff_id,
+                photo=photo,
+                caption=report_text,
+                reply_markup=keyboard
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=staff_id,
+                text=report_text,
+                reply_markup=keyboard
+            )
 
     await update.message.reply_text("Заявка отправлена ✅")
     return ConversationHandler.END
