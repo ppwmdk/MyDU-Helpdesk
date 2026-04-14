@@ -44,12 +44,19 @@ ADMIN_IDS = {
 DEVELOPER_IDS = {
     int(x.strip()) for x in os.getenv("DEVELOPER_IDS", "").split(",") if x.strip()
 }
+
+# СЮДА ВСТАВЬ СВОЙ TELEGRAM ID, ЧТОБЫ ПОЛУЧАТЬ КОПИИ ВСЕХ СООБЩЕНИЙ СОТРУДНИКОВ
 SUPER_ADMIN_IDS = {
-    123456789  
+    548200976
 }
 
 NAME, GROUP, MODULE, DESCRIPTION, SCREENSHOT = range(5)
-STAFF_REPLY_TEXT = 200
+STAFF_REPORT_ID = 100
+STAFF_FILTER_MODULE = 101
+STAFF_SET_STATUS_ID = 102
+STAFF_SET_STATUS_VALUE = 103
+STAFF_TAKE_REPORT_ID = 104
+STAFF_RESOLVE_REPORT_ID = 105
 
 MODULES = [
     "Регистрация на дисциплины",
@@ -112,7 +119,7 @@ def get_role_name(user_id: int) -> str:
 
 
 # =========================
-# UI / COMMANDS
+# UI
 # =========================
 def get_staff_keyboard(user_id: int):
     keyboard = [
@@ -173,6 +180,7 @@ async def set_commands(application: Application):
         BotCommand("support", "Связаться с поддержкой"),
         BotCommand("report", "Отправить ошибку"),
         BotCommand("my_role", "Показать мою роль"),
+        BotCommand("my_reports", "Мои заявки"),
         BotCommand("staff_menu", "Открыть меню сотрудника"),
         BotCommand("list_reports", "Последние заявки"),
         BotCommand("report_by_id", "Полная заявка по ID"),
@@ -180,6 +188,7 @@ async def set_commands(application: Application):
         BotCommand("set_status", "Изменить статус заявки"),
         BotCommand("take_report", "Взять заявку в работу"),
         BotCommand("resolve_report", "Отметить заявку решённой"),
+        BotCommand("cancel", "Отменить действие"),
     ]
 
     admin_commands = staff_commands + [
@@ -204,42 +213,13 @@ async def set_commands(application: Application):
         )
 
 
+# =========================
+# HELPERS
+# =========================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     print(f"Ошибка: {context.error}")
 
-async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not user:
-        return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, created_at, module, status
-                FROM reports
-                WHERE user_id = %s
-                ORDER BY id DESC
-                LIMIT 20
-            """, (user.id,))
-            rows = cursor.fetchall()
-
-    if not rows:
-        await update.message.reply_text("У вас пока нет отправленных заявок.")
-        return
-
-    lines = ["📋 Ваши заявки:\n"]
-    for row in rows:
-        lines.append(
-            f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Модуль: {row['module']}\n"
-            f"Статус: {row['status']}\n"
-        )
-
-    await update.message.reply_text("\n".join(lines))
-
-# =========================
-# TEXT BUILDERS
-# =========================
 def build_report_text(
     report_id: int,
     created_at: datetime,
@@ -282,7 +262,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /report — отправить заявку\n"
         "• /faq — посмотреть частые вопросы\n"
         "• /support — резервная связь с поддержкой\n"
-        "• /my_role — узнать свою роль\n\n"
+        "• /my_role — узнать свою роль\n"
+        "• /my_reports — посмотреть свои заявки\n\n"
         "⚠️ Писать напрямую в поддержку нужно только если бот не отвечает на /start и(или) /report.\n\n"
         f"👤 Ваша роль: {role}"
     )
@@ -332,6 +313,37 @@ async def my_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
     await update.message.reply_text(f"Ваша роль: {get_role_name(user.id)}")
+
+
+async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, created_at, module, status
+                FROM reports
+                WHERE user_id = %s
+                ORDER BY id DESC
+                LIMIT 20
+            """, (user.id,))
+            rows = cursor.fetchall()
+
+    if not rows:
+        await update.message.reply_text("У вас пока нет отправленных заявок.")
+        return
+
+    lines = ["📋 Ваши заявки:\n"]
+    for row in rows:
+        lines.append(
+            f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Модуль: {row['module']}\n"
+            f"Статус: {row['status']}\n"
+        )
+
+    await update.message.reply_text("\n".join(lines))
 
 
 # =========================
@@ -893,7 +905,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             conn.commit()
 
-        await query.edit_message_reply_markup(reply_markup=build_inline_keyboard(report_id, "В работе"))
+        await query.edit_message_reply_markup(
+            reply_markup=build_inline_keyboard(report_id, "В работе")
+        )
         await query.message.reply_text(f"🛠 Заявка #{report_id} взята в работу")
 
         if row["user_id"]:
@@ -932,7 +946,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             conn.commit()
 
-        await query.edit_message_reply_markup(reply_markup=build_inline_keyboard(report_id, "Решено"))
+        await query.edit_message_reply_markup(
+            reply_markup=build_inline_keyboard(report_id, "Решено")
+        )
         await query.message.reply_text(f"✅ Заявка #{report_id} решена")
 
         if row["user_id"]:
@@ -960,7 +976,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# REPLY TO STUDENT
+# REPLY TO STUDENT + LOG TO YOU
 # =========================
 async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_staff(update.effective_user.id):
@@ -986,26 +1002,40 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         try:
-         for admin_id in SUPER_ADMIN_IDS:
-        try:
+            # Сообщение студенту
             await context.bot.send_message(
-                chat_id=admin_id,
+                chat_id=row["user_id"],
                 text=(
-                    f"📩 Сотрудник ответил студенту\n\n"
-                    f"👤 Отправитель: @{update.effective_user.username} "
-                    f"(ID: {update.effective_user.id})\n"
-                    f"📌 Заявка: #{report_id}\n\n"
-                    f"💬 Сообщение:\n{update.message.text}"
+                    f"📩 Сообщение по вашей заявке #{report_id}\n\n"
+                    f"{update.message.text}"
                 )
             )
+
+            # Копия тебе
+            for admin_id in SUPER_ADMIN_IDS:
+                try:
+                    username_text = f"@{update.effective_user.username}" if update.effective_user.username else "-"
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=(
+                            f"📩 Сотрудник ответил студенту\n\n"
+                            f"👤 Отправитель: {username_text} "
+                            f"(ID: {update.effective_user.id})\n"
+                            f"📌 Заявка: #{report_id}\n\n"
+                            f"💬 Сообщение:\n{update.message.text}"
+                        )
+                    )
+                except Exception as e:
+                    print(f"Ошибка отправки лога: {e}")
+
+            await update.message.reply_text("Сообщение студенту отправлено ✅")
+
         except Exception as e:
-            print(f"Ошибка отправки лога: {e}")
+            print(f"Не удалось отправить сообщение студенту: {e}")
+            await update.message.reply_text("Не удалось отправить сообщение студенту.")
 
-    await update.message.reply_text("Сообщение студенту отправлено ✅")
+        context.user_data.pop("reply_report_id", None)
 
-except Exception as e:
-    print(f"Не удалось отправить сообщение студенту: {e}")
-    await update.message.reply_text("Ошибка отправки")
 
 # =========================
 # STAFF BUTTON ROUTER
@@ -1023,7 +1053,7 @@ async def staff_button_router(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if text == "Поиск по ID":
         await update.message.reply_text("Введите номер заявки:")
-        return 100
+        return STAFF_REPORT_ID
 
     if text == "Фильтр по модулю":
         modules_text = "\n".join(MODULES)
@@ -1031,19 +1061,19 @@ async def staff_button_router(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Введите название модуля точно так же, как ниже:\n\n"
             f"{modules_text}"
         )
-        return 101
+        return STAFF_FILTER_MODULE
 
     if text == "Изменить статус":
         await update.message.reply_text("Введите ID заявки:")
-        return 102
+        return STAFF_SET_STATUS_ID
 
     if text == "Взять в работу":
         await update.message.reply_text("Введите ID заявки:")
-        return 104
+        return STAFF_TAKE_REPORT_ID
 
     if text == "Отметить решённой":
         await update.message.reply_text("Введите ID заявки:")
-        return 105
+        return STAFF_RESOLVE_REPORT_ID
 
     if text == "Выгрузить Excel":
         if is_admin(user.id):
@@ -1062,7 +1092,7 @@ async def staff_get_report_id(update: Update, context: ContextTypes.DEFAULT_TYPE
         report_id = int(update.message.text.strip())
     except ValueError:
         await update.message.reply_text("ID должен быть числом.")
-        return 100
+        return STAFF_REPORT_ID
 
     await send_full_report(update, context, report_id)
     return ConversationHandler.END
@@ -1103,11 +1133,11 @@ async def staff_get_status_report_id(update: Update, context: ContextTypes.DEFAU
         report_id = int(update.message.text.strip())
     except ValueError:
         await update.message.reply_text("ID должен быть числом.")
-        return 102
+        return STAFF_SET_STATUS_ID
 
     context.user_data["status_report_id"] = report_id
     await update.message.reply_text("Введите новый статус:\nНовая\nВ работе\nРешено")
-    return 103
+    return STAFF_SET_STATUS_VALUE
 
 
 async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1116,7 +1146,7 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
 
     if new_status not in STATUSES:
         await update.message.reply_text("Недопустимый статус.")
-        return 103
+        return STAFF_SET_STATUS_VALUE
 
     with get_conn() as conn:
         with conn.cursor() as cursor:
@@ -1146,7 +1176,7 @@ async def staff_take_report_by_button(update: Update, context: ContextTypes.DEFA
         report_id = int(update.message.text.strip())
     except ValueError:
         await update.message.reply_text("ID должен быть числом.")
-        return 104
+        return STAFF_TAKE_REPORT_ID
 
     context.args = [str(report_id)]
     await take_report(update, context)
@@ -1158,7 +1188,7 @@ async def staff_resolve_report_by_button(update: Update, context: ContextTypes.D
         report_id = int(update.message.text.strip())
     except ValueError:
         await update.message.reply_text("ID должен быть числом.")
-        return 105
+        return STAFF_RESOLVE_REPORT_ID
 
     context.args = [str(report_id)]
     await resolve_report(update, context)
@@ -1194,12 +1224,12 @@ staff_conv_handler = ConversationHandler(
         MessageHandler(filters.Regex("^Отметить решённой$"), staff_button_router),
     ],
     states={
-        100: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_report_id)],
-        101: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_filter_module)],
-        102: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_status_report_id)],
-        103: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_status_value)],
-        104: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_take_report_by_button)],
-        105: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_resolve_report_by_button)],
+        STAFF_REPORT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_report_id)],
+        STAFF_FILTER_MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_filter_module)],
+        STAFF_SET_STATUS_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_status_report_id)],
+        STAFF_SET_STATUS_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_get_status_value)],
+        STAFF_TAKE_REPORT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_take_report_by_button)],
+        STAFF_RESOLVE_REPORT_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_resolve_report_by_button)],
     },
     fallbacks=[CommandHandler("cancel", cancel)],
 )
@@ -1210,6 +1240,7 @@ telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("faq", faq))
 telegram_app.add_handler(CommandHandler("support", support))
 telegram_app.add_handler(CommandHandler("my_role", my_role))
+telegram_app.add_handler(CommandHandler("my_reports", my_reports))
 telegram_app.add_handler(CommandHandler("staff_menu", staff_menu))
 telegram_app.add_handler(CommandHandler("list_reports", list_reports))
 telegram_app.add_handler(CommandHandler("report_by_id", report_by_id))
@@ -1218,7 +1249,7 @@ telegram_app.add_handler(CommandHandler("set_status", set_status))
 telegram_app.add_handler(CommandHandler("take_report", take_report))
 telegram_app.add_handler(CommandHandler("resolve_report", resolve_report))
 telegram_app.add_handler(CommandHandler("export_excel", export_excel))
-telegram_app.add_handler(CommandHandler("my_reports", my_reports))
+telegram_app.add_handler(CommandHandler("cancel", cancel))
 
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
@@ -1261,4 +1292,4 @@ async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
-    return {"ok": True}
+    return {"ok": True}S
