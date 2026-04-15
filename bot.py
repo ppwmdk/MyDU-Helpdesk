@@ -1750,9 +1750,9 @@ async def admin_reports_page(request: Request):
             reports = cursor.fetchall()
 
     return templates.TemplateResponse(
-        "admin_reports.html",
+        request,
+        "reports.html",
         {
-            "request": request,
             "reports": reports,
         }
     )
