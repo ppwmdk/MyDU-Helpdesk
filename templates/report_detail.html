@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Заявка #{{ report.id }}{% endblock %}
+
+{% block content %}
+<section class="heading-row">
+    <div>
+        <h1>Заявка #{{ report.id }}</h1>
+        <p>{{ report.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+    </div>
+    <a class="ghost-link" href="/admin/reports">Назад к списку</a>
+</section>
+
+{% if message == 'status' %}
+    <p class="alert success">Статус обновлён.</p>
+{% elif message == 'reply' %}
+    <p class="alert success">Сообщение студенту отправлено.</p>
+{% endif %}
+
+{% if error %}
+    <p class="alert error">
+        {% if error == 'reply_empty' %}
+            Напишите текст сообщения.
+        {% elif error == 'reply' %}
+            Не удалось отправить сообщение студенту.
+        {% elif error == 'status' %}
+            Не удалось изменить статус.
+        {% else %}
+            Действие не выполнено.
+        {% endif %}
+    </p>
+{% endif %}
+
+<section class="detail-grid">
+    <div class="detail-main">
+        <div class="section-block">
+            <div class="section-title">
+                <h2>Данные заявки</h2>
+                <span class="badge {{ report.status }}">{{ report.status }}</span>
+            </div>
+            <dl class="details">
+                <dt>ФИО</dt>
+                <dd>{{ report.name }}</dd>
+                <dt>Группа</dt>
+                <dd>{{ report.group_name }}</dd>
+                <dt>Модуль</dt>
+                <dd>{{ report.module }}</dd>
+                <dt>Telegram ID</dt>
+                <dd>{{ report.user_id or '-' }}</dd>
+                <dt>Username</dt>
+                <dd>{% if report.username %}@{{ report.username }}{% else %}-{% endif %}</dd>
+                <dt>Описание</dt>
+                <dd class="long-text">{{ report.description }}</dd>
+            </dl>
+        </div>
+
+        <div class="section-block">
+            <h2>Ответ студенту</h2>
+            {% if report.user_id %}
+                <form method="post" action="/admin/reports/{{ report.id }}/reply" class="stack">
+                    <textarea name="message" rows="6" placeholder="Напишите сообщение студенту" required></textarea>
+                    <button type="submit" class="primary-button">Отправить сообщение</button>
+                </form>
+            {% else %}
+                <p class="empty">У заявки нет Telegram ID студента.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <aside class="side-panel">
+        <div class="section-block">
+            <h2>Статус</h2>
+            <form method="post" action="/admin/reports/{{ report.id }}/status" class="stack">
+                <select name="status">
+                    {% for status in statuses %}
+                        <option value="{{ status }}" {% if report.status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="primary-button">Сохранить статус</button>
+            </form>
+            <div class="quick-actions">
+                {% if report.status == 'Новая' %}
+                    <form method="post" action="/admin/reports/{{ report.id }}/status">
+                        <input type="hidden" name="status" value="В работе">
+                        <input type="hidden" name="next_url" value="/admin/reports/{{ report.id }}?message=status">
+                        <button type="submit">В работу</button>
+                    </form>
+                {% endif %}
+                {% if report.status != 'Решено' %}
+                    <form method="post" action="/admin/reports/{{ report.id }}/status">
+                        <input type="hidden" name="status" value="Решено">
+                        <input type="hidden" name="next_url" value="/admin/reports/{{ report.id }}?message=status">
+                        <button type="submit">Решено</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="section-block">
+            <h2>Скриншот</h2>
+            {% if report.screenshot_file_id %}
+                <a class="screenshot-link" href="/admin/reports/{{ report.id }}/screenshot" target="_blank">
+                    <img src="/admin/reports/{{ report.id }}/screenshot" alt="Скриншот заявки #{{ report.id }}">
+                </a>
+            {% else %}
+                <p class="empty">Скриншот не приложен.</p>
+            {% endif %}
+        </div>
+    </aside>
+</section>
+{% endblock %}

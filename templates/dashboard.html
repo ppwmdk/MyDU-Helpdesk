@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Главная{% endblock %}
+
+{% block content %}
+<section class="heading-row">
+    <div>
+        <h1>Админ-панель</h1>
+        <p>Заявки студентов и быстрые действия.</p>
+    </div>
+    <a class="primary-link" href="/admin/reports">Открыть все заявки</a>
+</section>
+
+<section class="stats-grid">
+    <a class="stat-card" href="/admin/reports">
+        <span>Всего</span>
+        <strong>{{ counts.total }}</strong>
+    </a>
+    <a class="stat-card new" href="/admin/reports?status=Новая">
+        <span>Новые</span>
+        <strong>{{ counts.new_count }}</strong>
+    </a>
+    <a class="stat-card progress" href="/admin/reports?status=В работе">
+        <span>В работе</span>
+        <strong>{{ counts.in_progress_count }}</strong>
+    </a>
+    <a class="stat-card done" href="/admin/reports?status=Решено">
+        <span>Решено</span>
+        <strong>{{ counts.resolved_count }}</strong>
+    </a>
+</section>
+
+<section class="section-block">
+    <div class="section-title">
+        <h2>Последние заявки</h2>
+        <a href="/admin/reports/export.xlsx">Скачать Excel</a>
+    </div>
+
+    {% if recent_reports %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Дата</th>
+                        <th>Студент</th>
+                        <th>Модуль</th>
+                        <th>Статус</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for report in recent_reports %}
+                        <tr>
+                            <td>#{{ report.id }}</td>
+                            <td>{{ report.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ report.name }}<br><span>{{ report.group_name }}</span></td>
+                            <td>{{ report.module }}</td>
+                            <td><span class="badge {{ report.status }}">{{ report.status }}</span></td>
+                            <td class="actions">
+                                {% if report.status == 'Новая' %}
+                                    <form method="post" action="/admin/reports/{{ report.id }}/status">
+                                        <input type="hidden" name="status" value="В работе">
+                                        <input type="hidden" name="next_url" value="/admin">
+                                        <button type="submit">В работу</button>
+                                    </form>
+                                {% endif %}
+                                {% if report.status != 'Решено' %}
+                                    <form method="post" action="/admin/reports/{{ report.id }}/status">
+                                        <input type="hidden" name="status" value="Решено">
+                                        <input type="hidden" name="next_url" value="/admin">
+                                        <button type="submit">Решено</button>
+                                    </form>
+                                {% endif %}
+                                <a class="small-link" href="/admin/reports/{{ report.id }}">Открыть</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="empty">Заявок пока нет.</p>
+    {% endif %}
+</section>
+{% endblock %}

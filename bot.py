@@ -1,11 +1,18 @@
 import os
+import hashlib
+import hmac
+import time
 from datetime import datetime
 from io import BytesIO
+from fastapi.responses import HTMLResponse
 
 import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
 
 from telegram import (
@@ -28,10 +35,17 @@ from telegram.ext import (
     filters,
 )
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+ADMIN_PANEL_USERNAME = os.getenv("ADMIN_PANEL_USERNAME", "admin")
+ADMIN_PANEL_PASSWORD = os.getenv("ADMIN_PANEL_PASSWORD")
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET") or TOKEN or "change-me"
+ADMIN_COOKIE_SECURE = os.getenv("ADMIN_COOKIE_SECURE", "false").lower() == "true"
+ADMIN_SESSION_COOKIE = "admin_session"
+ADMIN_SESSION_MAX_AGE = 60 * 60 * 12
 
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден")
@@ -320,10 +334,14 @@ async def notify_admins_status_change(
     else:
         return
 
-    username_text = f"@{actor.username}" if actor and actor.username else "-"
-    actor_name = actor.full_name if actor and actor.full_name else "-"
-    actor_id = actor.id if actor else "-"
-    role = get_role_name(actor.id) if actor else "-"
+    actor_username = getattr(actor, "username", None)
+    actor_full_name = getattr(actor, "full_name", None)
+    actor_id = getattr(actor, "id", None)
+    actor_role = getattr(actor, "role_name", None)
+
+    username_text = f"@{actor_username}" if actor_username else "-"
+    actor_name = actor_full_name if actor_full_name else "-"
+    role = actor_role if actor_role else (get_role_name(actor_id) if actor_id else "-")
 
     text = (
         f"{title}\n\n"
@@ -332,7 +350,7 @@ async def notify_admins_status_change(
         f"📊 Статус: {new_status}\n\n"
         f"👤 Кто изменил: {actor_name}\n"
         f"🔐 Роль: {role}\n"
-        f"🆔 Telegram ID: {actor_id}\n"
+        f"🆔 Telegram ID: {actor_id if actor_id else '-'}\n"
         f"🔗 Username: {username_text}"
     )
 
@@ -341,6 +359,297 @@ async def notify_admins_status_change(
             await context.bot.send_message(chat_id=admin_id, text=text)
         except Exception as e:
             print(f"Не удалось уведомить админа {admin_id}: {e}")
+
+
+class WebActor:
+    def __init__(self, username: str):
+        self.id = None
+        self.username = None
+        self.full_name = f"Веб-панель: {username}"
+        self.role_name = "Веб-панель"
+
+
+def create_admin_session(username: str) -> str:
+    timestamp = str(int(time.time()))
+    payload = f"{username}|{timestamp}"
+    signature = hmac.new(
+        ADMIN_SESSION_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}|{signature}"
+
+
+def verify_admin_session(session_value: str | None) -> str | None:
+    if not session_value:
+        return None
+
+    parts = session_value.split("|")
+    if len(parts) != 3:
+        return None
+
+    username, timestamp, signature = parts
+    payload = f"{username}|{timestamp}"
+    expected_signature = hmac.new(
+        ADMIN_SESSION_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+
+    try:
+        session_age = int(time.time()) - int(timestamp)
+    except ValueError:
+        return None
+
+    if session_age > ADMIN_SESSION_MAX_AGE:
+        return None
+
+    if username != ADMIN_PANEL_USERNAME:
+        return None
+
+    return username
+
+
+def get_admin_username(request: Request) -> str | None:
+    return verify_admin_session(request.cookies.get(ADMIN_SESSION_COOKIE))
+
+
+def admin_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+
+def get_dashboard_counts() -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE status = 'Новая') AS new_count,
+                    COUNT(*) FILTER (WHERE status = 'В работе') AS in_progress_count,
+                    COUNT(*) FILTER (WHERE status = 'Решено') AS resolved_count
+                FROM reports
+            """)
+            return cursor.fetchone()
+
+
+def get_reports(
+    status_filter: str | None = None,
+    module_filter: str | None = None,
+    search: str | None = None,
+    limit: int | None = 100,
+) -> list[dict]:
+    conditions = []
+    params = []
+
+    if status_filter and status_filter in STATUSES:
+        conditions.append("status = %s")
+        params.append(status_filter)
+
+    if module_filter and module_filter in MODULES:
+        conditions.append("module = %s")
+        params.append(module_filter)
+
+    if search:
+        search_value = search.strip()
+        if search_value:
+            like_value = f"%{search_value}%"
+            conditions.append("""
+                (
+                    CAST(id AS TEXT) ILIKE %s
+                    OR name ILIKE %s
+                    OR group_name ILIKE %s
+                    OR COALESCE(username, '') ILIKE %s
+                    OR module ILIKE %s
+                    OR description ILIKE %s
+                )
+            """)
+            params.extend([like_value] * 6)
+
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    limit_sql = "LIMIT %s" if limit else ""
+    if limit:
+        params.append(limit)
+
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT id, created_at, user_id, username, name, group_name, module,
+                       description, screenshot_file_id, status
+                FROM reports
+                {where_sql}
+                ORDER BY id DESC
+                {limit_sql}
+                """,
+                params,
+            )
+            return cursor.fetchall()
+
+
+def get_report(report_id: int) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, created_at, user_id, username, name, group_name, module,
+                       description, screenshot_file_id, status
+                FROM reports
+                WHERE id = %s
+            """, (report_id,))
+            return cursor.fetchone()
+
+
+def update_report_status_in_db(report_id: int, new_status: str) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, user_id, module
+                FROM reports
+                WHERE id = %s
+            """, (report_id,))
+            report = cursor.fetchone()
+
+            if not report:
+                return None
+
+            cursor.execute(
+                "UPDATE reports SET status = %s WHERE id = %s",
+                (new_status, report_id),
+            )
+        conn.commit()
+
+    return report
+
+
+async def notify_student_status(report: dict, report_id: int, new_status: str):
+    if not report["user_id"]:
+        return
+
+    if new_status == "В работе":
+        text = (
+            f"🛠 Обновление по вашей заявке #{report_id}\n\n"
+            f"Модуль: {report['module']}\n"
+            "Статус: В работе\n\n"
+            "Ваше обращение принято сотрудниками и уже находится в обработке."
+        )
+    elif new_status == "Решено":
+        text = (
+            f"✅ Обновление по вашей заявке #{report_id}\n\n"
+            f"Модуль: {report['module']}\n"
+            "Статус: Решено\n\n"
+            "Здравствуйте! Ваша проблема была обработана и отмечена как решённая.\n"
+            "Пожалуйста, проверьте работу модуля снова.\n\n"
+            "Если ошибка всё ещё сохраняется, отправьте новую заявку через /report."
+        )
+    else:
+        return
+
+    try:
+        await telegram_app.bot.send_message(chat_id=report["user_id"], text=text)
+    except Exception as e:
+        print(f"Не удалось уведомить студента: {e}")
+
+
+async def apply_report_status_change(report_id: int, new_status: str, actor) -> bool:
+    if new_status not in STATUSES:
+        return False
+
+    report = update_report_status_in_db(report_id, new_status)
+    if not report:
+        return False
+
+    await sync_report_keyboards(telegram_app, report_id, new_status)
+    await notify_admins_status_change(
+        context=telegram_app,
+        report_id=report_id,
+        module=report["module"],
+        new_status=new_status,
+        actor=actor,
+    )
+    await notify_student_status(report, report_id, new_status)
+    return True
+
+
+async def send_reply_to_student_from_admin(report_id: int, message_text: str, actor) -> bool:
+    report = get_report(report_id)
+    if not report or not report["user_id"]:
+        return False
+
+    try:
+        await telegram_app.bot.send_message(
+            chat_id=report["user_id"],
+            text=(
+                f"📩 Сообщение по вашей заявке #{report_id}\n\n"
+                f"{message_text}"
+            ),
+        )
+    except Exception as e:
+        print(f"Не удалось отправить сообщение студенту: {e}")
+        return False
+
+    log_text = (
+        "📩 Сотрудник ответил студенту\n\n"
+        f"👤 Отправитель: {actor.full_name}\n"
+        f"📌 Заявка: #{report_id}\n\n"
+        f"💬 Сообщение:\n{message_text}"
+    )
+
+    for admin_id in ADMIN_IDS.union(SUPER_ADMIN_IDS):
+        try:
+            await telegram_app.bot.send_message(chat_id=admin_id, text=log_text)
+        except Exception as e:
+            print(f"Ошибка отправки лога: {e}")
+
+    return True
+
+
+def build_reports_excel(rows: list[dict]) -> BytesIO:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Заявки"
+
+    ws.append([
+        "ID",
+        "Дата",
+        "Telegram ID",
+        "Username",
+        "ФИО",
+        "Группа",
+        "Модуль",
+        "Описание",
+        "Статус",
+        "Есть скриншот",
+    ])
+
+    for row in rows:
+        ws.append([
+            row["id"],
+            row["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+            row["user_id"],
+            row["username"],
+            row["name"],
+            row["group_name"],
+            row["module"],
+            row["description"],
+            row["status"],
+            "Да" if row["screenshot_file_id"] else "Нет",
+        ])
+
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            value = str(cell.value) if cell.value is not None else ""
+            if len(value) > max_length:
+                max_length = len(value)
+        ws.column_dimensions[column_letter].width = min(max_length + 2, 40)
+
+    file_stream = BytesIO()
+    wb.save(file_stream)
+    file_stream.seek(0)
+    return file_stream
 
 
 # =========================
@@ -975,58 +1284,7 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Только админ может выгружать Excel.")
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, created_at, user_id, username, name, group_name, module, description, status, screenshot_file_id
-                FROM reports
-                ORDER BY id DESC
-            """)
-            rows = cursor.fetchall()
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Заявки"
-
-    ws.append([
-        "ID",
-        "Дата",
-        "Telegram ID",
-        "Username",
-        "ФИО",
-        "Группа",
-        "Модуль",
-        "Описание",
-        "Статус",
-        "Есть скриншот"
-    ])
-
-    for row in rows:
-        ws.append([
-            row["id"],
-            row["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
-            row["user_id"],
-            row["username"],
-            row["name"],
-            row["group_name"],
-            row["module"],
-            row["description"],
-            row["status"],
-            "Да" if row["screenshot_file_id"] else "Нет"
-        ])
-
-    for column in ws.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            value = str(cell.value) if cell.value is not None else ""
-            if len(value) > max_length:
-                max_length = len(value)
-        ws.column_dimensions[column_letter].width = min(max_length + 2, 40)
-
-    file_stream = BytesIO()
-    wb.save(file_stream)
-    file_stream.seek(0)
+    file_stream = build_reports_excel(get_reports(limit=None))
 
     await update.message.reply_document(
         document=file_stream,
@@ -1476,6 +1734,236 @@ telegram_app.add_handler(staff_conv_handler)
 # FASTAPI WEBHOOK
 # =========================
 app = FastAPI()
+
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_reports_page(request: Request):
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, created_at, name, group_name, module, status
+                FROM reports
+                ORDER BY id DESC
+            """)
+            reports = cursor.fetchall()
+
+    return templates.TemplateResponse(
+        "admin_reports.html",
+        {
+            "request": request,
+            "reports": reports,
+        }
+    )
+
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+
+@app.get("/admin/login", response_class=HTMLResponse)
+async def admin_login_page(request: Request):
+    if get_admin_username(request):
+        return RedirectResponse(url="/admin", status_code=303)
+
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "error": None,
+            "configured": bool(ADMIN_PANEL_PASSWORD),
+            "username": ADMIN_PANEL_USERNAME,
+        },
+    )
+
+
+@app.post("/admin/login")
+async def admin_login(
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    if not ADMIN_PANEL_PASSWORD:
+        return RedirectResponse(url="/admin/login?error=config", status_code=303)
+
+    if (
+        hmac.compare_digest(username, ADMIN_PANEL_USERNAME)
+        and hmac.compare_digest(password, ADMIN_PANEL_PASSWORD)
+    ):
+        response = RedirectResponse(url="/admin", status_code=303)
+        response.set_cookie(
+            key=ADMIN_SESSION_COOKIE,
+            value=create_admin_session(username),
+            max_age=ADMIN_SESSION_MAX_AGE,
+            httponly=True,
+            secure=ADMIN_COOKIE_SECURE,
+            samesite="lax",
+        )
+        return response
+
+    return RedirectResponse(url="/admin/login?error=1", status_code=303)
+
+
+@app.post("/admin/logout")
+async def admin_logout():
+    response = RedirectResponse(url="/admin/login", status_code=303)
+    response.delete_cookie(ADMIN_SESSION_COOKIE)
+    return response
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "admin_username": admin_username,
+            "counts": get_dashboard_counts(),
+            "recent_reports": get_reports(limit=8),
+            "statuses": STATUSES,
+            "modules": MODULES,
+            "active_page": "dashboard",
+        },
+    )
+
+
+@app.get("/admin/reports", response_class=HTMLResponse)
+async def admin_reports(
+    request: Request,
+    status: str | None = None,
+    module: str | None = None,
+    q: str | None = None,
+):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    if status and status not in STATUSES:
+        status = None
+    if module and module not in MODULES:
+        module = None
+
+    return templates.TemplateResponse(
+        "reports.html",
+        {
+            "request": request,
+            "admin_username": admin_username,
+            "reports": get_reports(status_filter=status, module_filter=module, search=q, limit=100),
+            "statuses": STATUSES,
+            "modules": MODULES,
+            "selected_status": status or "",
+            "selected_module": module or "",
+            "query": q or "",
+            "active_page": "reports",
+        },
+    )
+
+
+@app.get("/admin/reports/export.xlsx")
+async def admin_export_reports(request: Request):
+    if not get_admin_username(request):
+        return admin_redirect()
+
+    file_stream = build_reports_excel(get_reports(limit=None))
+    filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        file_stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/admin/reports/{report_id}", response_class=HTMLResponse)
+async def admin_report_detail(request: Request, report_id: int):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+
+    return templates.TemplateResponse(
+        "report_detail.html",
+        {
+            "request": request,
+            "admin_username": admin_username,
+            "report": report,
+            "statuses": STATUSES,
+            "modules": MODULES,
+            "active_page": "reports",
+            "message": request.query_params.get("message"),
+            "error": request.query_params.get("error"),
+        },
+    )
+
+
+@app.get("/admin/reports/{report_id}/screenshot")
+async def admin_report_screenshot(request: Request, report_id: int):
+    if not get_admin_username(request):
+        return admin_redirect()
+
+    report = get_report(report_id)
+    if not report or not report["screenshot_file_id"]:
+        raise HTTPException(status_code=404, detail="Скриншот не найден")
+
+    try:
+        file = await telegram_app.bot.get_file(report["screenshot_file_id"])
+        image_bytes = await file.download_as_bytearray()
+    except Exception as e:
+        print(f"Не удалось загрузить скриншот заявки #{report_id}: {e}")
+        raise HTTPException(status_code=502, detail="Не удалось загрузить скриншот")
+
+    return Response(content=bytes(image_bytes), media_type="image/jpeg")
+
+
+@app.post("/admin/reports/{report_id}/status")
+async def admin_report_status(
+    request: Request,
+    report_id: int,
+    status: str = Form(...),
+    next_url: str = Form(default=""),
+):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    success = await apply_report_status_change(report_id, status, WebActor(admin_username))
+    if not success:
+        return RedirectResponse(url=f"/admin/reports/{report_id}?error=status", status_code=303)
+
+    if next_url.startswith("/admin"):
+        return RedirectResponse(url=next_url, status_code=303)
+
+    return RedirectResponse(url=f"/admin/reports/{report_id}?message=status", status_code=303)
+
+
+@app.post("/admin/reports/{report_id}/reply")
+async def admin_report_reply(
+    request: Request,
+    report_id: int,
+    message: str = Form(...),
+):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    message_text = message.strip()
+    if not message_text:
+        return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply_empty", status_code=303)
+
+    success = await send_reply_to_student_from_admin(
+        report_id=report_id,
+        message_text=message_text,
+        actor=WebActor(admin_username),
+    )
+    if not success:
+        return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply", status_code=303)
+
+    return RedirectResponse(url=f"/admin/reports/{report_id}?message=reply", status_code=303)
 
 
 @app.on_event("startup")

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Админ-панель{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/admin.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="/admin">Заявки</a>
+        <nav class="nav">
+            <a class="{% if active_page == 'dashboard' %}active{% endif %}" href="/admin">Главная</a>
+            <a class="{% if active_page == 'reports' %}active{% endif %}" href="/admin/reports">Все заявки</a>
+            <a href="/admin/reports?status=Новая">Новые</a>
+            <a href="/admin/reports/export.xlsx">Excel</a>
+        </nav>
+        <form method="post" action="/admin/logout" class="logout-form">
+            <span>{{ admin_username }}</span>
+            <button type="submit" class="ghost-button">Выйти</button>
+        </form>
+    </header>
+
+    <main class="page">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

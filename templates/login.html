@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Вход в админ-панель</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/admin.css') }}">
+</head>
+<body class="login-page">
+    <main class="login-panel">
+        <h1>Вход</h1>
+
+        {% if not configured %}
+            <p class="alert error">
+                Добавьте ADMIN_PANEL_PASSWORD в .env на сервере и перезапустите приложение.
+            </p>
+        {% endif %}
+
+        {% if request.query_params.get('error') == '1' %}
+            <p class="alert error">Неверный логин или пароль.</p>
+        {% elif request.query_params.get('error') == 'config' %}
+            <p class="alert error">Пароль для панели ещё не настроен.</p>
+        {% endif %}
+
+        <form method="post" action="/admin/login" class="stack">
+            <label>
+                Логин
+                <input name="username" value="{{ username }}" autocomplete="username" required>
+            </label>
+            <label>
+                Пароль
+                <input name="password" type="password" autocomplete="current-password" required>
+            </label>
+            <button type="submit" class="primary-button">Войти</button>
+        </form>
+    </main>
+</body>
+</html>
