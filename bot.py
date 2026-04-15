@@ -1847,19 +1847,12 @@ async def admin_reports(
         module = None
 
     return templates.TemplateResponse(
-        "reports.html",
-        {
-            "request": request,
-            "admin_username": admin_username,
-            "reports": get_reports(status_filter=status, module_filter=module, search=q, limit=100),
-            "statuses": STATUSES,
-            "modules": MODULES,
-            "selected_status": status or "",
-            "selected_module": module or "",
-            "query": q or "",
-            "active_page": "reports",
-        },
-    )
+    "reports.html",
+    {
+        "request": request,
+        "reports": reports
+    }
+)
 
 
 @app.get("/admin/reports/export.xlsx")
