@@ -1254,19 +1254,7 @@ async def take_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         actor=user,
     )
 
-    if row["user_id"]:
-        try:
-            await context.bot.send_message(
-                chat_id=row["user_id"],
-                text=(
-                    f"🛠 Обновление по вашей заявке #{report_id}\n\n"
-                    f"Модуль: {row['module']}\n"
-                    "Статус: В работе\n\n"
-                    "Ваше обращение принято сотрудниками и уже находится в обработке."
-                )
-            )
-        except Exception as e:
-            print(f"Не удалось уведомить студента: {e}")
+        await notify_student_status(row, report_id, "В работе")
 
 
 async def resolve_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1314,21 +1302,7 @@ async def resolve_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         actor=user,
     )
 
-    if row["user_id"]:
-        try:
-            await context.bot.send_message(
-                chat_id=row["user_id"],
-                text=(
-                    f"✅ Обновление по вашей заявке #{report_id}\n\n"
-                    f"Модуль: {row['module']}\n"
-                    "Статус: Решено\n\n"
-                    "Здравствуйте! Ваша проблема была обработана и отмечена как решённая.\n"
-                    "Пожалуйста, проверьте работу модуля снова.\n\n"
-                    "Если ошибка всё ещё сохраняется, отправьте новую заявку через /report."
-                )
-            )
-        except Exception as e:
-            print(f"Не удалось уведомить студента: {e}")
+        await notify_student_status(row, report_id, "Решено")
 
 
 async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1402,19 +1376,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             actor=user,
         )
 
-        if row["user_id"]:
-            try:
-                await context.bot.send_message(
-                    chat_id=row["user_id"],
-                    text=(
-                        f"🛠 Обновление по вашей заявке #{report_id}\n\n"
-                        f"Модуль: {row['module']}\n"
-                        "Статус: В работе\n\n"
-                        "Ваше обращение принято сотрудниками и уже находится в обработке."
-                    )
-                )
-            except Exception as e:
-                print(f"Не удалось уведомить студента: {e}")
+         await notify_student_status(row, report_id, "В работе")
 
     elif data.startswith("done_"):
         report_id = int(data.split("_")[1])
@@ -1458,21 +1420,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             actor=user,
         )
 
-        if row["user_id"]:
-            try:
-                await context.bot.send_message(
-                    chat_id=row["user_id"],
-                    text=(
-                        f"✅ Обновление по вашей заявке #{report_id}\n\n"
-                        f"Модуль: {row['module']}\n"
-                        "Статус: Решено\n\n"
-                        "Здравствуйте! Ваша проблема была обработана и отмечена как решённая.\n"
-                        "Пожалуйста, проверьте работу модуля снова.\n\n"
-                        "Если ошибка всё ещё сохраняется, отправьте новую заявку через /report."
-                    )
-                )
-            except Exception as e:
-                print(f"Не удалось уведомить студента: {e}")
+        await notify_student_status(row, report_id, "Решено")
 
     elif data.startswith("reply_"):
         report_id = int(data.split("_")[1])
@@ -2069,19 +2017,8 @@ async def admin_take_report(request: Request, report_id: int):
             """, ("В работе", report_id))
         conn.commit()
 
-    if report["user_id"]:
-        try:
-            await telegram_app.bot.send_message(
-                chat_id=report["user_id"],
-                text=(
-                    f"🛠 Обновление по вашей заявке #{report_id}\n\n"
-                    f"Модуль: {report['module']}\n"
-                    "Статус: В работе\n\n"
-                    "Ваше обращение принято сотрудниками и уже находится в обработке."
-                )
-            )
-        except Exception as e:
-            print(f"Ошибка уведомления студента: {e}")
+        await notify_student_status(report, report_id, "В работе")
+    
 
     return RedirectResponse(url="/admin", status_code=303)
 
@@ -2107,21 +2044,7 @@ async def admin_resolve_report(request: Request, report_id: int):
             """, ("Решено", report_id))
         conn.commit()
 
-    if report["user_id"]:
-        try:
-            await telegram_app.bot.send_message(
-                chat_id=report["user_id"],
-                text=(
-                    f"✅ Обновление по вашей заявке #{report_id}\n\n"
-                    f"Модуль: {report['module']}\n"
-                    "Статус: Решено\n\n"
-                    "Здравствуйте! Ваша проблема была обработана и отмечена как решённая.\n"
-                    "Пожалуйста, проверьте работу модуля снова.\n\n"
-                    "Если ошибка всё ещё сохраняется, отправьте новую заявку через /report."
-                )
-            )
-        except Exception as e:
-            print(f"Ошибка уведомления студента: {e}")
+        await notify_student_status(report, report_id, "Решено")
 
     return RedirectResponse(url="/admin", status_code=303)
 
