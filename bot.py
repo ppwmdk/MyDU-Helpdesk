@@ -1745,9 +1745,9 @@ async def admin_login_page(request: Request):
         return RedirectResponse(url="/admin", status_code=303)
 
     return templates.TemplateResponse(
+        request,
         "login.html",
         {
-            "request": request,
             "error": None,
             "configured": bool(ADMIN_PANEL_PASSWORD),
             "username": ADMIN_PANEL_USERNAME,
