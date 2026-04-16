@@ -329,6 +329,7 @@ def get_report_id_from_student_reply(message) -> int | None:
         return row["report_id"]
 
     text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    import re
     match = re.search(r"#(\d+)", text)
     if match:
         return int(match.group(1))
@@ -585,7 +586,8 @@ async def notify_student_status(report: dict, report_id: int, new_status: str):
             f"🛠 Обновление по вашей заявке #{report_id}\n\n"
             f"Модуль: {report['module']}\n"
             "Статус: В работе\n\n"
-            "Ваше обращение принято сотрудниками и уже находится в обработке."
+            "Ваше обращение принято сотрудниками и уже находится в обработке.\n\n"
+            "Если хотите что-то уточнить, ответьте на это сообщение."
         )
     elif new_status == "Решено":
         text = (
@@ -594,13 +596,17 @@ async def notify_student_status(report: dict, report_id: int, new_status: str):
             "Статус: Решено\n\n"
             "Здравствуйте! Ваша проблема была обработана и отмечена как решённая.\n"
             "Пожалуйста, проверьте работу модуля снова.\n\n"
-            "Если ошибка всё ещё сохраняется, отправьте новую заявку через /report."
+            "Если хотите написать уточнение, ответьте на это сообщение."
         )
     else:
         return
 
     try:
-        await telegram_app.bot.send_message(chat_id=report["user_id"], text=text)
+        sent = await telegram_app.bot.send_message(
+            chat_id=report["user_id"],
+            text=text,
+        )
+        save_student_report_message(report_id, report["user_id"], sent.message_id)
     except Exception as e:
         print(f"Не удалось уведомить студента: {e}")
 
@@ -631,29 +637,18 @@ async def send_reply_to_student_from_admin(report_id: int, message_text: str, ac
         return False
 
     try:
-        await telegram_app.bot.send_message(
+        sent = await telegram_app.bot.send_message(
             chat_id=report["user_id"],
             text=(
                 f"📩 Сообщение по вашей заявке #{report_id}\n\n"
-                f"{message_text}"
+                f"{message_text}\n\n"
+                "Ответьте на это сообщение, если хотите продолжить диалог."
             ),
         )
+        save_student_report_message(report_id, report["user_id"], sent.message_id)
     except Exception as e:
         print(f"Не удалось отправить сообщение студенту: {e}")
         return False
-
-    log_text = (
-        "📩 Сотрудник ответил студенту\n\n"
-        f"👤 Отправитель: {actor.full_name}\n"
-        f"📌 Заявка: #{report_id}\n\n"
-        f"💬 Сообщение:\n{message_text}"
-    )
-
-    for admin_id in ADMIN_IDS.union(SUPER_ADMIN_IDS):
-        try:
-            await telegram_app.bot.send_message(chat_id=admin_id, text=log_text)
-        except Exception as e:
-            print(f"Ошибка отправки лога: {e}")
 
     return True
 
@@ -1532,6 +1527,55 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     await message.reply_text(
         f"Ваш ответ по заявке #{report_id} передан сотрудникам ✅"
     )
+
+async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message
+
+    if not user or not message:
+        return
+
+    if is_staff(user.id):
+        return
+
+    report_id = get_report_id_from_student_reply(message)
+    if not report_id:
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, module, name, group_name
+                FROM reports
+                WHERE id = %s
+            """, (report_id,))
+            report = cursor.fetchone()
+
+    if not report:
+        await message.reply_text("Не удалось определить заявку, к которой относится ответ.")
+        return
+
+    username_text = f"@{user.username}" if user.username else "-"
+    text = (
+        f"💬 Ответ студента по заявке #{report_id}\n\n"
+        f"👤 Студент: {report['name']}\n"
+        f"🎓 Группа: {report['group_name']}\n"
+        f"🧩 Модуль: {report['module']}\n"
+        f"🆔 Telegram ID: {user.id}\n"
+        f"🔗 Username: {username_text}\n\n"
+        f"Сообщение:\n{message.text or '[не текстовое сообщение]'}"
+    )
+
+    recipients = ADMIN_IDS.union(DEVELOPER_IDS).union(SUPER_ADMIN_IDS)
+    for admin_id in recipients:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except Exception as e:
+            print(f"Не удалось переслать ответ студента {admin_id}: {e}")
+
+    await message.reply_text(
+        f"Ваш ответ по заявке #{report_id} передан сотрудникам ✅"
+    )
 # =========================
 # STAFF BUTTON ROUTER
 # =========================
@@ -1764,6 +1808,9 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_r
 telegram_app.add_handler(
     MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, student_reply_router),
     group=11,
+)
+telegram_app.add_handler(
+    MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, student_reply_router)
 )
 
 telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
