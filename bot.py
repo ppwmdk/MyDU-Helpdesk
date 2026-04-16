@@ -1848,10 +1848,22 @@ async def admin_reports(
 
     return templates.TemplateResponse(
     "reports.html",
-    {
-        "request": request,
-        "reports": reports
-    }
+    <td>
+    <a href="/admin/report/{{ report.id }}">Открыть</a><br>
+
+    {% if report.status != "В работе" and report.status != "Решено" %}
+    <form method="post" action="/admin/report/{{ report.id }}/take" style="display:inline;">
+        <button type="submit">В работу</button>
+    </form>
+    {% endif %}
+
+    {% if report.status != "Решено" %}
+    <form method="post" action="/admin/report/{{ report.id }}/resolve" style="display:inline;">
+        <button type="submit">Решено</button>
+    </form>
+    {% endif %}
+    </td>
+        
 )
 
 
@@ -1957,6 +1969,84 @@ async def admin_report_reply(
         return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply", status_code=303)
 
     return RedirectResponse(url=f"/admin/reports/{report_id}?message=reply", status_code=303)
+
+
+@app.post("/admin/report/{report_id}/take")
+async def admin_take_report(request: Request, report_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, user_id, module
+                FROM reports
+                WHERE id = %s
+            """, (report_id,))
+            report = cursor.fetchone()
+
+            if not report:
+                return RedirectResponse(url="/admin", status_code=303)
+
+            cursor.execute("""
+                UPDATE reports
+                SET status = %s
+                WHERE id = %s
+            """, ("В работе", report_id))
+        conn.commit()
+
+    if report["user_id"]:
+        try:
+            await telegram_app.bot.send_message(
+                chat_id=report["user_id"],
+                text=(
+                    f"🛠 Обновление по вашей заявке #{report_id}\n\n"
+                    f"Модуль: {report['module']}\n"
+                    "Статус: В работе\n\n"
+                    "Ваше обращение принято сотрудниками и уже находится в обработке."
+                )
+            )
+        except Exception as e:
+            print(f"Ошибка уведомления студента: {e}")
+
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/report/{report_id}/resolve")
+async def admin_resolve_report(request: Request, report_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, user_id, module
+                FROM reports
+                WHERE id = %s
+            """, (report_id,))
+            report = cursor.fetchone()
+
+            if not report:
+                return RedirectResponse(url="/admin", status_code=303)
+
+            cursor.execute("""
+                UPDATE reports
+                SET status = %s
+                WHERE id = %s
+            """, ("Решено", report_id))
+        conn.commit()
+
+    if report["user_id"]:
+        try:
+            await telegram_app.bot.send_message(
+                chat_id=report["user_id"],
+                text=(
+                    f"✅ Обновление по вашей заявке #{report_id}\n\n"
+                    f"Модуль: {report['module']}\n"
+                    "Статус: Решено\n\n"
+                    "Здравствуйте! Ваша проблема была обработана и отмечена как решённая.\n"
+                    "Пожалуйста, проверьте работу модуля снова.\n\n"
+                    "Если ошибка всё ещё сохраняется, отправьте новую заявку через /report."
+                )
+            )
+        except Exception as e:
+            print(f"Ошибка уведомления студента: {e}")
+
+    return RedirectResponse(url="/admin", status_code=303)
 
 
 @app.on_event("startup")
