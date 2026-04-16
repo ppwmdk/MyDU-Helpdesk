@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import hmac
 import time
@@ -108,6 +109,14 @@ def init_db():
             """)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS report_messages (
+                    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                    chat_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    PRIMARY KEY (report_id, chat_id, message_id)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS student_report_messages (
                     report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
                     chat_id BIGINT NOT NULL,
                     message_id BIGINT NOT NULL,
@@ -281,6 +290,50 @@ def save_report_message(report_id: int, chat_id: int, message_id: int):
                 (report_id, chat_id, message_id)
             )
         conn.commit()
+
+
+def save_student_report_message(report_id: int, chat_id: int, message_id: int):
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO student_report_messages (report_id, chat_id, message_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (report_id, chat_id, message_id)
+            )
+        conn.commit()
+
+
+def get_report_id_from_student_reply(message) -> int | None:
+    if not message or not message.reply_to_message:
+        return None
+
+    reply_message_id = message.reply_to_message.message_id
+    chat_id = message.chat_id
+
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT report_id
+                FROM student_report_messages
+                WHERE chat_id = %s AND message_id = %s
+                """,
+                (chat_id, reply_message_id)
+            )
+            row = cursor.fetchone()
+
+    if row:
+        return row["report_id"]
+
+    text = message.reply_to_message.text or message.reply_to_message.caption or ""
+    match = re.search(r"#(\d+)", text)
+    if match:
+        return int(match.group(1))
+
+    return None
 
 
 async def sync_report_keyboards(
@@ -1491,6 +1544,46 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("reply_report_id", None)
 
 
+async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message
+
+    if not user or not message:
+        return
+
+    if is_staff(user.id):
+        return
+
+    report_id = get_report_id_from_student_reply(message)
+    if not report_id:
+        return
+
+    report = get_report(report_id)
+    if not report:
+        await message.reply_text("Не удалось определить заявку, к которой относится ответ.")
+        return
+
+    username_text = f"@{user.username}" if user.username else "-"
+    text = (
+        f"💬 Ответ студента по заявке #{report_id}\n\n"
+        f"👤 Студент: {report['name']}\n"
+        f"🎓 Группа: {report['group_name']}\n"
+        f"🧩 Модуль: {report['module']}\n"
+        f"🆔 Telegram ID: {user.id}\n"
+        f"🔗 Username: {username_text}\n\n"
+        f"Сообщение:\n{message.text or '[не текстовое сообщение]'}"
+    )
+
+    recipients = ADMIN_IDS.union(DEVELOPER_IDS).union(SUPER_ADMIN_IDS)
+    for admin_id in recipients:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except Exception as e:
+            print(f"Не удалось переслать ответ студента {admin_id}: {e}")
+
+    await message.reply_text(
+        f"Ваш ответ по заявке #{report_id} передан сотрудникам ✅"
+    )
 # =========================
 # STAFF BUTTON ROUTER
 # =========================
@@ -1720,6 +1813,10 @@ telegram_app.add_handler(CommandHandler("cancel", cancel))
 
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
+telegram_app.add_handler(
+    MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, student_reply_router),
+    group=11,
+)
 
 telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Последние заявки$"), staff_button_router))
@@ -1795,9 +1892,9 @@ async def admin_dashboard(request: Request):
         return admin_redirect()
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "admin_username": admin_username,
             "counts": get_dashboard_counts(),
             "recent_reports": get_reports(limit=8),
@@ -1824,7 +1921,12 @@ async def admin_reports(
     if module and module not in MODULES:
         module = None
 
-    reports = get_reports(limit=None, status=status, module=module, query=q)
+    reports = get_reports(
+        status_filter=status,
+        module_filter=module,
+        search=q,
+        limit=None,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -1867,9 +1969,9 @@ async def admin_report_detail(request: Request, report_id: int):
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
     return templates.TemplateResponse(
+        request,
         "report_detail.html",
         {
-            "request": request,
             "admin_username": admin_username,
             "report": report,
             "statuses": STATUSES,
