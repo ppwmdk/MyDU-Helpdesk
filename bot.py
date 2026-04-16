@@ -1735,30 +1735,8 @@ telegram_app.add_handler(staff_conv_handler)
 # =========================
 app = FastAPI()
 
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_reports_page(request: Request):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, created_at, name, group_name, module, status
-                FROM reports
-                ORDER BY id DESC
-            """)
-            reports = cursor.fetchall()
-
-    return templates.TemplateResponse(
-        request,
-        "reports.html",
-        {
-            "reports": reports,
-        }
-    )
-
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 
 @app.get("/admin/login", response_class=HTMLResponse)
@@ -1846,25 +1824,22 @@ async def admin_reports(
     if module and module not in MODULES:
         module = None
 
+    reports = get_reports(limit=None, status=status, module=module, query=q)
+
     return templates.TemplateResponse(
-    "reports.html",
-    <td>
-    <a href="/admin/report/{{ report.id }}">Открыть</a><br>
-
-    {% if report.status != "В работе" and report.status != "Решено" %}
-    <form method="post" action="/admin/report/{{ report.id }}/take" style="display:inline;">
-        <button type="submit">В работу</button>
-    </form>
-    {% endif %}
-
-    {% if report.status != "Решено" %}
-    <form method="post" action="/admin/report/{{ report.id }}/resolve" style="display:inline;">
-        <button type="submit">Решено</button>
-    </form>
-    {% endif %}
-    </td>
-        
-)
+        request,
+        "reports.html",
+        {
+            "admin_username": admin_username,
+            "reports": reports,
+            "statuses": STATUSES,
+            "modules": MODULES,
+            "selected_status": status or "",
+            "selected_module": module or "",
+            "query": q or "",
+            "active_page": "reports",
+        },
+    )
 
 
 @app.get("/admin/reports/export.xlsx")

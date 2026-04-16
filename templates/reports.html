@@ -38,6 +38,22 @@
     <a class="ghost-link" href="/admin/reports">Сбросить</a>
 </form>
 
+<td>
+    <a href="/admin/reports/{{ report.id }}">Открыть</a><br>
+
+    {% if report.status != "В работе" and report.status != "Решено" %}
+    <form method="post" action="/admin/report/{{ report.id }}/take" style="display:inline;">
+        <button type="submit">В работу</button>
+    </form>
+    {% endif %}
+
+    {% if report.status != "Решено" %}
+    <form method="post" action="/admin/report/{{ report.id }}/resolve" style="display:inline;">
+        <button type="submit">Решено</button>
+    </form>
+    {% endif %}
+</td>
+
 <section class="section-block">
     {% if reports %}
         <div class="table-wrap">
