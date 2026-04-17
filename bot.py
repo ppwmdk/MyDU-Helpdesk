@@ -337,6 +337,19 @@ def get_report_id_from_student_reply(message) -> int | None:
     return None
 
 
+def get_last_active_report_for_user(user_id: int) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, module, name, group_name, status
+                FROM reports
+                WHERE user_id = %s
+                  AND status IN ('Новая', 'В работе')
+                ORDER BY id DESC
+                LIMIT 1
+            """, (user_id,))
+            return cursor.fetchone()
+
 async def sync_report_keyboards(
     context: ContextTypes.DEFAULT_TYPE,
     report_id: int,
@@ -1498,12 +1511,27 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     report_id = get_report_id_from_student_reply(message)
-    if not report_id:
-        return
+    report = None
 
-    report = get_report(report_id)
-    if not report:
-        await message.reply_text("Не удалось определить заявку, к которой относится ответ.")
+    if report_id:
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, module, name, group_name, status
+                    FROM reports
+                    WHERE id = %s
+                """, (report_id,))
+                report = cursor.fetchone()
+    else:
+        report = get_last_active_report_for_user(user.id)
+        if report:
+            report_id = report["id"]
+
+    if not report_id or not report:
+        await message.reply_text(
+            "Не удалось определить, к какой заявке относится сообщение.\n"
+            "Пожалуйста, ответьте на сообщение бота или отправьте новую заявку через /report."
+        )
         return
 
     username_text = f"@{user.username}" if user.username else "-"
@@ -1512,6 +1540,7 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
         f"👤 Студент: {report['name']}\n"
         f"🎓 Группа: {report['group_name']}\n"
         f"🧩 Модуль: {report['module']}\n"
+        f"📊 Статус: {report['status']}\n"
         f"🆔 Telegram ID: {user.id}\n"
         f"🔗 Username: {username_text}\n\n"
         f"Сообщение:\n{message.text or '[не текстовое сообщение]'}"
@@ -1520,12 +1549,16 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     recipients = ADMIN_IDS.union(DEVELOPER_IDS).union(SUPER_ADMIN_IDS)
     for admin_id in recipients:
         try:
-            await context.bot.send_message(chat_id=admin_id, text=text)
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                reply_markup=build_inline_keyboard(report_id, report["status"])
+            )
         except Exception as e:
             print(f"Не удалось переслать ответ студента {admin_id}: {e}")
 
     await message.reply_text(
-        f"Ваш ответ по заявке #{report_id} передан сотрудникам ✅"
+        f"Ваше сообщение по заявке #{report_id} передано сотрудникам ✅"
     )
 
 async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1810,7 +1843,13 @@ telegram_app.add_handler(
     group=11,
 )
 telegram_app.add_handler(
-    MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, student_reply_router)
+    MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, student_reply_router),
+    group=11
+)
+
+telegram_app.add_handler(
+    MessageHandler(filters.TEXT & ~filters.COMMAND, student_reply_router),
+    group=12
 )
 
 telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
