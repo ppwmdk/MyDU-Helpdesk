@@ -830,6 +830,7 @@ async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 async def report_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+    context.user_data["report_in_progress"] = True
     await update.message.reply_text("Введите ФИО:")
     return NAME
 
@@ -965,12 +966,12 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     context.user_data.clear()
+    context.user_data["report_in_progress"] = False
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    context.user_data.pop("reply_report_id", None)
     await update.message.reply_text(
         "Действие отменено.",
         reply_markup=ReplyKeyboardRemove()
@@ -1524,13 +1525,24 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     if is_staff(user.id):
         return
 
-    if any(key in context.user_data for key in ("name", "group", "module", "description")):
+    # если студент сейчас заполняет /report — ничего не пересылаем
+    if context.user_data.get("report_in_progress"):
         return
 
-    if context.user_data.get("reply_report_id"):
-        return
-
-    if message.text.strip() in {"Пропустить"}:
+    # служебные кнопки и команды не считаем ответами
+    ignored_texts = {
+        "Пропустить",
+        "Новые заявки",
+        "Последние заявки",
+        "Поиск по ID",
+        "Фильтр по модулю",
+        "Изменить статус",
+        "Взять в работу",
+        "Отметить решённой",
+        "Выгрузить Excel",
+        "Скрыть меню",
+    }
+    if message.text.strip() in ignored_texts:
         return
 
     report_id = get_report_id_from_student_reply(message)
@@ -1554,7 +1566,6 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     username_text = f"@{user.username}" if user.username else "-"
-
     text = (
         f"💬 Ответ студента по заявке #{report_id}\n\n"
         f"👤 Студент: {report['name']}\n"
@@ -1567,7 +1578,6 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
     recipients = ADMIN_IDS.union(DEVELOPER_IDS).union(SUPER_ADMIN_IDS)
-
     for admin_id in recipients:
         try:
             await context.bot.send_message(
