@@ -1445,9 +1445,6 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not update.effective_user or not is_staff(update.effective_user.id):
         return
 
-    if not is_staff(user.id):
-    return
-
     report_id = context.user_data.get("reply_report_id")
     if not report_id:
         return
@@ -1472,13 +1469,12 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
             sent = await context.bot.send_message(
                 chat_id=row["user_id"],
                 text=(
-                    f"📩 Сообщение по вашей заявке #{report_id}\n\n"
+                    f"📩 Сотрудник ответил вам по заявке #{report_id}\n\n"
                     f"{update.message.text}\n\n"
-                    "Ответьте на это сообщение, чтобы продолжить диалог."
-                )
+                "Ответьте на это сообщение, чтобы продолжить диалог."
+                ),
             )
-            
-            save_student_report_message(report_id, row["user_id"], sent.message_id)
+        save_student_report_message(report_id, row["user_id"], sent.message_id)
 
             # Копия тебе
             for admin_id in SUPER_ADMIN_IDS:
