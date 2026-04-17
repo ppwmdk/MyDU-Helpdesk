@@ -1474,7 +1474,13 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "Ответьте на это сообщение, чтобы продолжить диалог."
                 ),
             )
-        save_student_report_message(report_id, row["user_id"], sent.message_id)
+
+            save_student_report_message(report_id, row["user_id"], sent.message_id)
+            
+        except Exception as e:
+            print(f"Ошибка отправки студенту: {e}")
+            await update.message.reply_text("Не удалось отправить сообщение студенту ❌")
+            return  
 
             # Копия тебе
             for admin_id in SUPER_ADMIN_IDS:
