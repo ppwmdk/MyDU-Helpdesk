@@ -2056,6 +2056,25 @@ app = FastAPI()
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
+@app.post("/admin/reports/bulk-action")
+async def admin_reports_bulk_action(
+    request: Request,
+    action: str = Form(...),
+    report_ids: list[int] = Form(default=[]),
+):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    if not report_ids:
+        return RedirectResponse(url="/admin/reports?message=no_selected", status_code=303)
+
+    target_status = "В работе" if action == "take" else "Решено"
+
+    for r_id in report_ids:
+        await apply_report_status_change(r_id, target_status, WebActor(admin_username))
+
+    return RedirectResponse(url=f"/admin/reports?message=bulk_success", status_code=303)
 
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_page(request: Request):
@@ -2319,25 +2338,6 @@ async def admin_take_report(request: Request, report_id: int):
     await notify_student_status(report, report_id, "В работе")
     return RedirectResponse(url="/admin", status_code=303)
 
-@app.post("/admin/reports/bulk-action")
-async def admin_reports_bulk_action(
-    request: Request,
-    action: str = Form(...),
-    report_ids: list[int] = Form(default=[]),
-):
-    admin_username = get_admin_username(request)
-    if not admin_username:
-        return admin_redirect()
-
-    if not report_ids:
-        return RedirectResponse(url="/admin/reports?message=no_selected", status_code=303)
-
-    target_status = "В работе" if action == "take" else "Решено"
-
-    for r_id in report_ids:
-        await apply_report_status_change(r_id, target_status, WebActor(admin_username))
-
-    return RedirectResponse(url=f"/admin/reports?message=bulk_success", status_code=303)
 
 @app.post("/admin/report/{report_id}/resolve")
 async def admin_resolve_report(request: Request, report_id: int):
