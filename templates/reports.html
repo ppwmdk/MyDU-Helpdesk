@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Панель управления | MyDU Helpdesk</title>
-    <!-- Google Fonts для красивого шрифта -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
@@ -14,9 +13,8 @@
             background-color: #f1f5f9;
             color: #1e293b;
         }
-        /* Боковая панель управления (Sidebar) */
         .sidebar {
-            background-color: #0f172a; /* Глубокий темно-синий */
+            background-color: #0f172a;
             min-height: 100vh;
             color: #f8fafc;
             border-right: 1px solid #1e293b;
@@ -34,7 +32,7 @@
             background-color: #1e293b;
         }
         .sidebar .nav-link.active {
-            color: #38bdf8; /* Неоновый голубой акцент */
+            color: #38bdf8;
             background-color: #1e293b;
         }
         .university-logo {
@@ -44,65 +42,26 @@
         .university-logo img {
             max-height: 45px;
             object-fit: contain;
+            filter: drop-shadow(0px 0px 3px rgba(255,255,255,0.2));
         }
-        /* Карточки и элементы интерфейса */
         .card-custom {
             background: #ffffff;
             border: none;
             border-radius: 0.75rem;
             box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
         }
-        .table-custom th {
-            background-color: #f8fafc;
-            color: #64748b;
-            font-weight: 600;
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 0.05em;
-            padding: 1rem;
+        .card-custom:hover {
+            transform: translateY(-2px);
         }
-        .table-custom td {
-            padding: 1rem;
-            border-bottom: 1px solid #f1f5f9;
-        }
-        .badge-new {
-            background-color: #fee2e2;
-            color: #ef4444;
-            border: 1px solid #fca5a5;
-        }
-        .badge-progress {
-            background-color: #fef3c7;
-            color: #d97706;
-            border: 1px solid #fcd34d;
-        }
-        .badge-resolved {
-            background-color: #dcfce7;
-            color: #16a34a;
-            border: 1px solid #86efac;
-        }
-        .btn-action-panel {
-            background-color: #1e293b;
-            color: #f8fafc;
-            border: 1px solid #334155;
-        }
-        .btn-action-panel:hover {
-            background-color: #334155;
-            color: #f8fafc;
-        }
-        /* Всплывающая панель массовых действий */
-        .bulk-actions-floating {
-            position: fixed;
-            bottom: 2rem;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 1050;
-            display: none;
-            min-width: 450px;
-            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        @keyframes slideUp {
-            from { transform: translate(-50%, 100px); opacity: 0; }
-            to { transform: translate(-50%, 0); opacity: 1; }
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
         }
     </style>
 </head>
@@ -111,23 +70,23 @@
 <div class="container-fluid">
     <div class="row">
         
-        <!-- SIDEBAR (Левое меню с логотипом) -->
+        <!-- SIDEBAR (Левое меню с исправленным лого) -->
         <nav class="col-md-3 col-lg-2 d-md-block sidebar collapse px-3">
             <div class="university-logo text-center mb-4">
-                <!-- Официальный логотип Astana IT University -->
-                <img src="https://astanait.edu.kz/wp-content/uploads/2020/05/aitu-logo-main.png" alt="AITU Logo" class="img-fluid">
+                <!-- Новый стабильный CDN-адрес логотипа AITU -->
+                <img src="https://images.squarespace-cdn.com/content/v1/5f3ff43cd3f538356be9d8d1/1601455589178-9M8K2T7I9V84K7G5I6OM/aitu-logo.png" alt="AITU Logo" class="img-fluid">
                 <div class="small text-muted mt-2 fw-semibold" style="letter-spacing: 1px; font-size: 0.75rem; color: #38bdf8 !important;">HELP-DESK</div>
             </div>
             
             <div class="position-sticky pt-2">
                 <ul class="nav flex-column">
                     <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'dashboard' %}active{% endif %}" href="/admin">
+                        <a class="nav-link active" href="/admin">
                             <i class="bi bi-grid-1x2-fill me-2"></i> Панель управления
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'reports' %}active{% endif %}" href="/admin/reports">
+                        <a class="nav-link" href="/admin/reports">
                             <i class="bi bi-journals me-2"></i> Все заявки
                         </a>
                     </li>
@@ -150,222 +109,138 @@
         <!-- MAIN CONTENT (Основная область) -->
         <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 py-4">
             
-            <!-- Заголовок страницы -->
             <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
                 <div>
-                    <h1 class="h3 fw-bold mb-1">Реестр обращений</h1>
-                    <p class="text-muted small mb-0">Управление, поиск и фильтрация всех входящих тикетов студентов.</p>
+                    <h1 class="h3 fw-bold mb-1">Панель управления</h1>
+                    <p class="text-muted small mb-0">Краткая статистика обращений в поддержку на текущий момент.</p>
                 </div>
-                <a href="/admin/reports/export.xlsx" class="btn btn-success px-3 py-2 fw-medium shadow-sm">
-                    <i class="bi bi-file-earmark-excel me-2"></i> Экспорт в Excel
-                </a>
             </div>
 
-            <!-- Уведомления -->
-            {% if request.query_params.get('message') == 'bulk_success' %}
-                <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm" role="alert">
-                    <i class="bi bi-check-circle-fill me-2 text-success"></i> Статусы выбранных заявок успешно изменены!
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% elif request.query_params.get('message') == 'no_selected' %}
-                <div class="alert alert-warning alert-dismissible fade show border-0 shadow-sm" role="alert">
-                    <i class="bi bi-exclamation-triangle-fill me-2 text-warning"></i> Вы не выбрали ни одной заявки для массовой операции.
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% endif %}
-
-            <!-- Панель фильтров (Интерактивная без кнопки) -->
-            <div class="card card-custom mb-4">
-                <div class="card-body p-4">
-                    <form method="GET" action="/admin/reports" id="filterForm" class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label text-secondary small fw-bold">Глобальный поиск</label>
-                            <div class="input-group">
-                                <span class="input-group-text bg-light border-end-0 text-muted">
-                                    <i class="bi bi-search"></i>
-                                </span>
-                                <input type="text" name="q" id="searchInput" class="form-control bg-light border-start-0" placeholder="Поиск по ФИО, группе, номеру тикета..." value="{{ query }}" autocomplete="off">
+            <!-- Статистика (Карточки) -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">Всего заявок</h6>
+                                <h3 class="fw-bold mb-0">{{ counts.total }}</h3>
                             </div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label text-secondary small fw-bold">Фильтр по статусу</label>
-                            <select name="status" class="form-select bg-light auto-submit">
-                                <option value="">Все статусы</option>
-                                {% for st in statuses %}
-                                    <option value="{{ st }}" {% if selected_status == st %}selected{% endif %}>{{ st }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label text-secondary small fw-bold">Фильтр по модулю</label>
-                            <select name="module" class="form-select bg-light auto-submit">
-                                <option value="">Все модули</option>
-                                {% for mod in modules %}
-                                    <option value="{{ mod }}" {% if selected_module == mod %}selected{% endif %}>{{ mod }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- Форма для списка и действий -->
-            <form id="bulkForm" action="/admin/reports/bulk-action" method="POST">
-                
-                <!-- Всплывающая плавающая панель массовых действий -->
-                <div id="bulkPanel" class="card border-0 shadow-lg bulk-actions-floating bg-dark text-white rounded-4">
-                    <div class="card-body d-flex align-items-center justify-content-between p-3">
-                        <div class="d-flex align-items-center">
-                            <span class="badge bg-primary rounded-circle me-3 p-2 d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;">
-                                <strong id="selectedCount" class="text-white">0</strong>
-                            </span>
-                            <span class="small fw-semibold">Заявок выбрано</span>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <button type="submit" name="action" value="take" class="btn btn-warning btn-sm text-dark fw-bold px-3">
-                                <i class="bi bi-play-fill me-1"></i> В работу
-                            </button>
-                            <button type="submit" name="action" value="resolve" class="btn btn-success btn-sm fw-bold px-3">
-                                <i class="bi bi-check-lg me-1"></i> Решить
-                            </button>
+                            <div class="stat-icon bg-primary-subtle text-primary">
+                                <i class="bi bi-clipboard-data"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">Новые</h6>
+                                <h3 class="fw-bold mb-0 text-danger">{{ counts.new_count }}</h3>
+                            </div>
+                            <div class="stat-icon bg-danger-subtle text-danger">
+                                <i class="bi bi-bell"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">В работе</h6>
+                                <h3 class="fw-bold mb-0 text-warning">{{ counts.in_progress_count }}</h3>
+                            </div>
+                            <div class="stat-icon bg-warning-subtle text-warning">
+                                <i class="bi bi-gear-fill"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">Решено</h6>
+                                <h3 class="fw-bold mb-0 text-success">{{ counts.resolved_count }}</h3>
+                            </div>
+                            <div class="stat-icon bg-success-subtle text-success">
+                                <i class="bi bi-check-circle"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-                <!-- Таблица заявок в стиле Dashboard -->
-                <div class="card card-custom overflow-hidden">
+            <!-- Список последних заявок -->
+            <div class="card card-custom">
+                <div class="card-header bg-transparent border-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0">Последние обращения</h5>
+                    <a href="/admin/reports" class="btn btn-sm btn-outline-secondary rounded-3">Смотреть все</a>
+                </div>
+                <div class="card-body px-0 pb-0">
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0 table-custom">
-                            <thead>
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
                                 <tr>
-                                    <th class="ps-4" style="width: 40px;">
-                                        <input class="form-check-input" type="checkbox" id="selectAll">
-                                    </th>
-                                    <th style="width: 100px;">ID</th>
-                                    <th>Студент</th>
+                                    <th class="ps-4" style="width: 100px;">ID</th>
+                                    <th>Студент / Группа</th>
                                     <th>Модуль</th>
-                                    <th>Описание проблемы</th>
+                                    <th>Описание</th>
                                     <th>Статус</th>
-                                    <th class="text-end pe-4" style="width: 120px;">Действие</th>
+                                    <th class="text-end pe-4">Действие</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {% if reports %}
-                                    {% for report in reports %}
+                                {% if recent_reports %}
+                                    {% for report in recent_reports %}
                                     <tr>
-                                        <td class="ps-4">
-                                            <input class="form-check-input report-checkbox" type="checkbox" name="report_ids" value="{{ report.id }}">
-                                        </td>
-                                        <td class="fw-bold text-secondary">#{{ report.id }}</td>
+                                        <td class="ps-4 fw-bold text-secondary">#{{ report.id }}</td>
                                         <td>
-                                            <div class="fw-semibold text-dark" style="font-size: 0.95rem;">{{ report.name }}</div>
-                                            <div class="text-muted small"><i class="bi bi-people me-1"></i> Группа: {{ report.group_name }}</div>
-                                            <div class="text-muted" style="font-size: 0.75rem;">
-                                                <i class="bi bi-calendar3 me-1"></i> {{ report.created_at.strftime('%Y-%m-%d %H:%M') }}
-                                            </div>
+                                            <div class="fw-semibold">{{ report.name }}</div>
+                                            <div class="text-muted small">{{ report.group_name }}</div>
                                         </td>
                                         <td>
-                                            <span class="badge bg-light text-secondary border px-2.5 py-1.5 rounded-3 fw-medium" style="font-size: 0.8rem;">
+                                            <span class="badge bg-light text-secondary border rounded-3 fw-medium">
                                                 {{ report.module }}
                                             </span>
                                         </td>
                                         <td>
-                                            <div class="text-truncate text-secondary" style="max-width: 320px; font-size: 0.9rem;" title="{{ report.description }}">
+                                            <div class="text-truncate text-secondary" style="max-width: 300px;">
                                                 {{ report.description }}
                                             </div>
                                         </td>
                                         <td>
                                             {% if report.status == "Новая" %}
-                                                <span class="badge badge-new px-3 py-2 rounded-pill fw-semibold" style="font-size: 0.75rem;">Новая</span>
+                                                <span class="badge bg-danger-subtle text-danger px-2.5 py-1.5 rounded-pill" style="font-size: 0.75rem;">Новая</span>
                                             {% elif report.status == "В работе" %}
-                                                <span class="badge badge-progress px-3 py-2 rounded-pill fw-semibold" style="font-size: 0.75rem;">В работе</span>
+                                                <span class="badge bg-warning-subtle text-warning px-2.5 py-1.5 rounded-pill" style="font-size: 0.75rem;">В работе</span>
                                             {% else %}
-                                                <span class="badge badge-resolved px-3 py-2 rounded-pill fw-semibold" style="font-size: 0.75rem;">Решено</span>
+                                                <span class="badge bg-success-subtle text-success px-2.5 py-1.5 rounded-pill" style="font-size: 0.75rem;">Решено</span>
                                             {% endif %}
                                         </td>
                                         <td class="text-end pe-4">
-                                            <a href="/admin/reports/{{ report.id }}" class="btn btn-sm btn-outline-primary rounded-3 px-3 py-1.5 fw-medium">
-                                                <i class="bi bi-eye me-1"></i> Открыть
+                                            <a href="/admin/reports/{{ report.id }}" class="btn btn-sm btn-outline-primary rounded-3">
+                                                Открыть
                                             </a>
                                         </td>
                                     </tr>
                                     {% endfor %}
                                 {% else %}
                                     <tr>
-                                        <td colspan="7" class="text-center py-5 text-muted">
-                                            <i class="bi bi-clipboard2-x fs-1 d-block mb-3 text-secondary"></i>
-                                            <span class="fw-medium">Заявки по выбранным критериям отсутствуют</span>
-                                        </td>
+                                        <td colspan="6" class="text-center py-4 text-muted">Заявок пока нет</td>
                                     </tr>
                                 {% endif %}
                             </tbody>
                         </table>
                     </div>
                 </div>
-            </form>
+            </div>
 
         </main>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-    const filterForm = document.getElementById('filterForm');
-    const searchInput = document.getElementById('searchInput');
-    const autoSubmitFields = document.querySelectorAll('.auto-submit');
-
-    // 1. Автоотправка фильтров при изменении
-    autoSubmitFields.forEach(select => {
-        select.addEventListener('change', () => {
-            filterForm.submit();
-        });
-    });
-
-    // 2. Живой поиск с задержкой (Debounce)
-    let searchTimeout;
-    searchInput.addEventListener('input', () => {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            filterForm.submit();
-        }, 500);
-    });
-
-    // Восстановление фокуса в конец строки ввода
-    window.addEventListener('DOMContentLoaded', () => {
-        const val = searchInput.value;
-        if (val) {
-            searchInput.value = '';
-            searchInput.focus();
-            searchInput.value = val;
-        }
-    });
-
-    // 3. Выделение чекбоксов и плавающее меню действий
-    const selectAll = document.getElementById('selectAll');
-    const checkboxes = document.querySelectorAll('.report-checkbox');
-    const bulkPanel = document.getElementById('bulkPanel');
-    const selectedCount = document.getElementById('selectedCount');
-
-    function updateBulkPanel() {
-        const checkedCount = document.querySelectorAll('.report-checkbox:checked').length;
-        if (checkedCount > 0) {
-            bulkPanel.style.display = 'flex';
-            selectedCount.textContent = checkedCount;
-        } else {
-            bulkPanel.style.display = 'none';
-        }
-    }
-
-    selectAll.addEventListener('change', function() {
-        checkboxes.forEach(cb => {
-            cb.checked = selectAll.checked;
-        });
-        updateBulkPanel();
-    });
-
-    checkboxes.forEach(cb => {
-        cb.addEventListener('change', updateBulkPanel);
-    });
-</script>
 </body>
 </html>
