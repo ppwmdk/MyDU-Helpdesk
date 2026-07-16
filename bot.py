@@ -1974,6 +1974,7 @@ staff_conv_handler = ConversationHandler(
 
 telegram_app.add_error_handler(error_handler)
 
+# Сначала добавляем команды
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("faq", faq))
 telegram_app.add_handler(CommandHandler("support", support))
@@ -1990,17 +1991,21 @@ telegram_app.add_handler(CommandHandler("resolve_report", resolve_report))
 telegram_app.add_handler(CommandHandler("export_excel", export_excel))
 telegram_app.add_handler(CommandHandler("cancel", cancel))
 
-telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
+# Сначала регистрируем диалоги (ConversationHandlers)
+telegram_app.add_handler(report_conv_handler)
+telegram_app.add_handler(staff_conv_handler)
 
+# Обработка inline-кнопок
+telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
+
+# Текстовые кнопки меню сотрудников
 telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Последние заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Выгрузить Excel$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Скрыть меню$"), staff_button_router))
 
-telegram_app.add_handler(report_conv_handler)
-telegram_app.add_handler(staff_conv_handler)
-
+# Глобальные перехватчики переписки (reply-сообщений) убираем в отдельные группы с более низким приоритетом
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
 telegram_app.add_handler(
     MessageHandler(filters.TEXT & ~filters.COMMAND, student_reply_router),
     group=20
