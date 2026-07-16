@@ -9,7 +9,6 @@ from io import BytesIO
 
 import psycopg
 from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -94,17 +93,52 @@ STATUSES = ["Новая", "В работе", "Решено"]
 # DATABASE & ASYNC POOL
 # =========================
 # Создаем асинхронный пул соединений. Минимальный размер 1, максимальный 10 коннектов.
-db_pool = AsyncConnectionPool(
-    conninfo=DATABASE_URL,
-    min_size=1,
-    max_size=10,
-    kwargs={"row_factory": dict_row},
-    open=False  # Открываем пул при старте FastAPI приложения
-)
+async def get_conn_async():
+    return await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+
+
+def get_sync_conn():
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
 async def init_db():
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reports (
+                    id SERIAL PRIMARY KEY,
+                    created_at TIMESTAMP NOT NULL,
+                    user_id BIGINT,
+                    username TEXT,
+                    name TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    module TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    screenshot_file_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'Новая'
+                )
+            """)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS report_messages (
+                    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                    chat_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    PRIMARY KEY (report_id, chat_id, message_id)
+                )
+            """)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS student_report_messages (
+                    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                    chat_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    PRIMARY KEY (report_id, chat_id, message_id)
+                )
+            """)
+        await conn.commit()
+
+
+async def init_db():
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reports (
@@ -315,7 +349,7 @@ def build_report_text(
 
 
 async def save_report_message(report_id: int, chat_id: int, message_id: int):
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -329,7 +363,7 @@ async def save_report_message(report_id: int, chat_id: int, message_id: int):
 
 
 async def save_student_report_message(report_id: int, chat_id: int, message_id: int):
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -349,7 +383,7 @@ async def get_report_id_from_student_reply(message) -> int | None:
     reply_message_id = message.reply_to_message.message_id
     chat_id = message.chat_id
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -373,7 +407,7 @@ async def get_report_id_from_student_reply(message) -> int | None:
 
 
 async def get_last_active_report_for_user(user_id: int) -> dict | None:
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, module, name, group_name, status
@@ -396,7 +430,7 @@ async def sync_report_keyboards(
     report = await get_report_async(report_id)
     module = report["module"] if report else ""
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -529,7 +563,7 @@ def admin_redirect() -> RedirectResponse:
 
 # Асинхронная версия для использования внутри бота и FastAPI роутов
 async def get_dashboard_counts_async() -> dict:
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT
@@ -581,7 +615,7 @@ async def get_reports_async(
     if limit:
         params.append(limit)
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 f"""
@@ -653,7 +687,7 @@ def get_reports(
 
 
 async def get_report_async(report_id: int) -> dict | None:
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, user_id, username, name, group_name, module,
@@ -678,7 +712,7 @@ def get_report(report_id: int) -> dict | None:
 
 
 async def update_report_status_in_db_async(report_id: int, new_status: str) -> dict | None:
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
@@ -910,7 +944,7 @@ async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, module, status
@@ -1010,7 +1044,7 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     created_at = datetime.now()
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
@@ -1121,7 +1155,7 @@ async def list_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет доступа к этой команде.")
         return
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, name, group_name, module, description, status
@@ -1159,7 +1193,7 @@ async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет доступа к этой команде.")
         return
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, name, group_name, module, description
@@ -1191,7 +1225,7 @@ async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_full_report(update: Update, context: ContextTypes.DEFAULT_TYPE, report_id: int):
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, user_id, username, name, group_name, module, description, screenshot_file_id, status
@@ -1260,7 +1294,7 @@ async def filter_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     module_name = " ".join(context.args).strip()
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, name, group_name, status
@@ -1315,7 +1349,7 @@ async def set_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Недопустимый статус.")
         return
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
             report = await cursor.fetchone()
@@ -1359,7 +1393,7 @@ async def take_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ID заявки должен быть числом.")
         return
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
@@ -1406,7 +1440,7 @@ async def resolve_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ID заявки должен быть числом.")
         return
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
@@ -1473,7 +1507,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
         # 1. Обновляем статус в БД на "Решено"
-        async with db_pool.connection() as conn:
+        async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
                     SELECT id, user_id, module, name, group_name, status
@@ -1534,7 +1568,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         report_id = int(data.split("_")[1])
         await save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
-        async with db_pool.connection() as conn:
+        async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
                     SELECT id, user_id, module, name, group_name, status
@@ -1577,7 +1611,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         report_id = int(data.split("_")[1])
         await save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
-        async with db_pool.connection() as conn:
+        async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
                     SELECT id, user_id, module, name, group_name, status
@@ -1638,7 +1672,7 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if update.message and update.message.text and not update.message.text.startswith("/"):
-        async with db_pool.connection() as conn:
+        async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
                     SELECT user_id
@@ -1719,7 +1753,7 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     report = None
 
     if report_id:
-        async with db_pool.connection() as conn:
+        async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
                     SELECT id, module, name, group_name, status
@@ -1831,7 +1865,7 @@ async def staff_get_report_id(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def staff_get_filter_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
     module_name = update.message.text.strip()
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, created_at, name, group_name, status
@@ -1878,7 +1912,7 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Недопустимый статус.")
         return STAFF_SET_STATUS_VALUE
 
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
             report = await cursor.fetchone()
@@ -2243,7 +2277,7 @@ async def admin_report_reply(
 
 @app.post("/admin/report/{report_id}/take")
 async def admin_take_report(request: Request, report_id: int):
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
@@ -2268,7 +2302,7 @@ async def admin_take_report(request: Request, report_id: int):
 
 @app.post("/admin/report/{report_id}/resolve")
 async def admin_resolve_report(request: Request, report_id: int):
-    async with db_pool.connection() as conn:
+    async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
@@ -2293,7 +2327,6 @@ async def admin_resolve_report(request: Request, report_id: int):
 
 @app.on_event("startup")
 async def on_startup():
-    await db_pool.open()  # Инициализация пула коннектов
     await init_db()
     await telegram_app.initialize()
     await telegram_app.start()
@@ -2304,7 +2337,6 @@ async def on_startup():
 async def on_shutdown():
     await telegram_app.stop()
     await telegram_app.shutdown()
-    await db_pool.close()  # Закрываем пул соединений при выключении
 
 
 @app.get("/")
