@@ -1,13 +1,15 @@
 import os
 import re
-import hashlib
 import hmac
 import time
+import hashlib
+import logging
 from datetime import datetime
 from io import BytesIO
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -34,6 +36,13 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -75,23 +84,29 @@ MODULES = [
     "Регистрация на дисциплины",
     "Общежитие",
     "Платежи",
+    "Приемная комиссия",
     "Другое",
 ]
 
 STATUSES = ["Новая", "В работе", "Решено"]
 
-
 # =========================
-# DATABASE
+# DATABASE & ASYNC POOL
 # =========================
-def get_conn():
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+# Создаем асинхронный пул соединений. Минимальный размер 1, максимальный 10 коннектов.
+db_pool = AsyncConnectionPool(
+    conninfo=DATABASE_URL,
+    min_size=1,
+    max_size=10,
+    kwargs={"row_factory": dict_row},
+    open=False  # Открываем пул при старте FastAPI приложения
+)
 
 
-def init_db():
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+async def init_db():
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reports (
                     id SERIAL PRIMARY KEY,
                     created_at TIMESTAMP NOT NULL,
@@ -105,7 +120,7 @@ def init_db():
                     status TEXT NOT NULL DEFAULT 'Новая'
                 )
             """)
-            cursor.execute("""
+            await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS report_messages (
                     report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
                     chat_id BIGINT NOT NULL,
@@ -113,7 +128,7 @@ def init_db():
                     PRIMARY KEY (report_id, chat_id, message_id)
                 )
             """)
-            cursor.execute("""
+            await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS student_report_messages (
                     report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
                     chat_id BIGINT NOT NULL,
@@ -121,7 +136,12 @@ def init_db():
                     PRIMARY KEY (report_id, chat_id, message_id)
                 )
             """)
-        conn.commit()
+        await conn.commit()
+
+
+# Вспомогательная синхронная обертка для вызовов, где async невозможен (например, рендеринг Excel в FastAPI потоке)
+def get_sync_conn():
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
 # =========================
@@ -174,22 +194,34 @@ def get_skip_screenshot_keyboard():
     )
 
 
-def build_inline_keyboard(report_id: int, status: str = "Новая") -> InlineKeyboardMarkup:
+def build_inline_keyboard(report_id: int, status: str = "Новая", module: str = "") -> InlineKeyboardMarkup:
     rows = []
 
-    if status == "Новая":
+    if module == "Приемная комиссия" and status == "Новая":
+        # Специальная логика для Приемной комиссии
+        rows.append([
+            InlineKeyboardButton("📨 Шаблонный ответ", callback_data=f"template_{report_id}"),
+            InlineKeyboardButton("✉️ Ответить вручную", callback_data=f"reply_{report_id}")
+        ])
         rows.append([
             InlineKeyboardButton("🛠 В работу", callback_data=f"take_{report_id}"),
             InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
         ])
-    elif status == "В работе":
-        rows.append([
-            InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
-        ])
+    else:
+        # Стандартная логика
+        if status == "Новая":
+            rows.append([
+                InlineKeyboardButton("🛠 В работу", callback_data=f"take_{report_id}"),
+                InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
+            ])
+        elif status == "В работе":
+            rows.append([
+                InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
+            ])
 
-    rows.append([
-        InlineKeyboardButton("✉️ Ответить студенту", callback_data=f"reply_{report_id}")
-    ])
+        rows.append([
+            InlineKeyboardButton("✉️ Ответить студенту", callback_data=f"reply_{report_id}")
+        ])
 
     return InlineKeyboardMarkup(rows)
 
@@ -232,23 +264,29 @@ async def set_commands(application: Application):
     )
 
     for dev_id in DEVELOPER_IDS:
-        await application.bot.set_my_commands(
-            staff_commands,
-            scope=BotCommandScopeChat(chat_id=dev_id)
-        )
+        try:
+            await application.bot.set_my_commands(
+                staff_commands,
+                scope=BotCommandScopeChat(chat_id=dev_id)
+            )
+        except Exception as e:
+            logger.error(f"Не удалось установить команды для разработчика {dev_id}: {e}")
 
     for admin_id in ADMIN_IDS:
-        await application.bot.set_my_commands(
-            admin_commands,
-            scope=BotCommandScopeChat(chat_id=admin_id)
-        )
+        try:
+            await application.bot.set_my_commands(
+                admin_commands,
+                scope=BotCommandScopeChat(chat_id=admin_id)
+            )
+        except Exception as e:
+            logger.error(f"Не удалось установить команды для админа {admin_id}: {e}")
 
 
 # =========================
 # HELPERS
 # =========================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    print(f"Ошибка: {context.error}")
+    logger.error(f"Ошибка в боте: {context.error}", exc_info=context.error)
 
 
 def build_report_text(
@@ -276,10 +314,10 @@ def build_report_text(
     )
 
 
-def save_report_message(report_id: int, chat_id: int, message_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
+async def save_report_message(report_id: int, chat_id: int, message_id: int):
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
                 """
                 INSERT INTO report_messages (report_id, chat_id, message_id)
                 VALUES (%s, %s, %s)
@@ -287,13 +325,13 @@ def save_report_message(report_id: int, chat_id: int, message_id: int):
                 """,
                 (report_id, chat_id, message_id)
             )
-        conn.commit()
+        await conn.commit()
 
 
-def save_student_report_message(report_id: int, chat_id: int, message_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
+async def save_student_report_message(report_id: int, chat_id: int, message_id: int):
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
                 """
                 INSERT INTO student_report_messages (report_id, chat_id, message_id)
                 VALUES (%s, %s, %s)
@@ -301,19 +339,19 @@ def save_student_report_message(report_id: int, chat_id: int, message_id: int):
                 """,
                 (report_id, chat_id, message_id)
             )
-        conn.commit()
+        await conn.commit()
 
 
-def get_report_id_from_student_reply(message) -> int | None:
+async def get_report_id_from_student_reply(message) -> int | None:
     if not message or not message.reply_to_message:
         return None
 
     reply_message_id = message.reply_to_message.message_id
     chat_id = message.chat_id
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
                 """
                 SELECT report_id
                 FROM student_report_messages
@@ -321,7 +359,7 @@ def get_report_id_from_student_reply(message) -> int | None:
                 """,
                 (chat_id, reply_message_id)
             )
-            row = cursor.fetchone()
+            row = await cursor.fetchone()
 
     if row:
         return row["report_id"]
@@ -334,10 +372,10 @@ def get_report_id_from_student_reply(message) -> int | None:
     return None
 
 
-def get_last_active_report_for_user(user_id: int) -> dict | None:
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+async def get_last_active_report_for_user(user_id: int) -> dict | None:
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, module, name, group_name, status
                 FROM reports
                 WHERE user_id = %s
@@ -345,7 +383,7 @@ def get_last_active_report_for_user(user_id: int) -> dict | None:
                 ORDER BY id DESC
                 LIMIT 1
             """, (user_id,))
-            return cursor.fetchone()
+            return await cursor.fetchone()
 
 
 async def sync_report_keyboards(
@@ -355,9 +393,12 @@ async def sync_report_keyboards(
     skip_chat_id: int | None = None,
     skip_message_id: int | None = None,
 ):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
+    report = await get_report_async(report_id)
+    module = report["module"] if report else ""
+
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
                 """
                 SELECT chat_id, message_id
                 FROM report_messages
@@ -365,9 +406,9 @@ async def sync_report_keyboards(
                 """,
                 (report_id,)
             )
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
-    keyboard = build_inline_keyboard(report_id, status)
+    keyboard = build_inline_keyboard(report_id, status, module)
     for row in rows:
         if row["chat_id"] == skip_chat_id and row["message_id"] == skip_message_id:
             continue
@@ -379,7 +420,7 @@ async def sync_report_keyboards(
                 reply_markup=keyboard,
             )
         except Exception as e:
-            print(
+            logger.warning(
                 f"Не удалось обновить кнопки заявки #{report_id} "
                 f"для чата {row['chat_id']}, сообщения {row['message_id']}: {e}"
             )
@@ -423,7 +464,7 @@ async def notify_admins_status_change(
         try:
             await context.bot.send_message(chat_id=admin_id, text=text)
         except Exception as e:
-            print(f"Не удалось уведомить админа {admin_id}: {e}")
+            logger.error(f"Не удалось уведомить админа {admin_id}: {e}")
 
 
 class WebActor:
@@ -486,10 +527,11 @@ def admin_redirect() -> RedirectResponse:
     return RedirectResponse(url="/admin/login", status_code=303)
 
 
-def get_dashboard_counts() -> dict:
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+# Асинхронная версия для использования внутри бота и FastAPI роутов
+async def get_dashboard_counts_async() -> dict:
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT
                     COUNT(*) AS total,
                     COUNT(*) FILTER (WHERE status = 'Новая') AS new_count,
@@ -497,9 +539,65 @@ def get_dashboard_counts() -> dict:
                     COUNT(*) FILTER (WHERE status = 'Решено') AS resolved_count
                 FROM reports
             """)
-            return cursor.fetchone()
+            return await cursor.fetchone()
 
 
+# Асинхронная версия получения списка заявок
+async def get_reports_async(
+    status_filter: str | None = None,
+    module_filter: str | None = None,
+    search: str | None = None,
+    limit: int | None = 100,
+) -> list[dict]:
+    conditions = []
+    params = []
+
+    if status_filter and status_filter in STATUSES:
+        conditions.append("status = %s")
+        params.append(status_filter)
+
+    if module_filter and module_filter in MODULES:
+        conditions.append("module = %s")
+        params.append(module_filter)
+
+    if search:
+        search_value = search.strip()
+        if search_value:
+            like_value = f"%{search_value}%"
+            conditions.append("""
+                (
+                    CAST(id AS TEXT) ILIKE %s
+                    OR name ILIKE %s
+                    OR group_name ILIKE %s
+                    OR COALESCE(username, '') ILIKE %s
+                    OR module ILIKE %s
+                    OR description ILIKE %s
+                )
+            """)
+            params.extend([like_value] * 6)
+
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    limit_sql = "LIMIT %s" if limit else ""
+    if limit:
+        params.append(limit)
+
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                f"""
+                SELECT id, created_at, user_id, username, name, group_name, module,
+                       description, screenshot_file_id, status
+                FROM reports
+                {where_sql}
+                ORDER BY id DESC
+                {limit_sql}
+                """,
+                params,
+            )
+            return await cursor.fetchall()
+
+
+# Синхронная версия для обратной совместимости в синхронных роутах FastAPI / openpyxl
 def get_reports(
     status_filter: str | None = None,
     module_filter: str | None = None,
@@ -538,7 +636,7 @@ def get_reports(
     if limit:
         params.append(limit)
 
-    with get_conn() as conn:
+    with get_sync_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 f"""
@@ -554,8 +652,21 @@ def get_reports(
             return cursor.fetchall()
 
 
+async def get_report_async(report_id: int) -> dict | None:
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT id, created_at, user_id, username, name, group_name, module,
+                       description, screenshot_file_id, status
+                FROM reports
+                WHERE id = %s
+            """, (report_id,))
+            return await cursor.fetchone()
+
+
+# Синхронный метод для FastAPI-шаблонов
 def get_report(report_id: int) -> dict | None:
-    with get_conn() as conn:
+    with get_sync_conn() as conn:
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT id, created_at, user_id, username, name, group_name, module,
@@ -566,24 +677,24 @@ def get_report(report_id: int) -> dict | None:
             return cursor.fetchone()
 
 
-def update_report_status_in_db(report_id: int, new_status: str) -> dict | None:
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+async def update_report_status_in_db_async(report_id: int, new_status: str) -> dict | None:
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
                 FROM reports
                 WHERE id = %s
             """, (report_id,))
-            report = cursor.fetchone()
+            report = await cursor.fetchone()
 
             if not report:
                 return None
 
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE reports SET status = %s WHERE id = %s",
                 (new_status, report_id),
             )
-        conn.commit()
+        await conn.commit()
 
     return report
 
@@ -617,16 +728,16 @@ async def notify_student_status(report: dict, report_id: int, new_status: str):
             chat_id=report["user_id"],
             text=text,
         )
-        save_student_report_message(report_id, report["user_id"], sent.message_id)
+        await save_student_report_message(report_id, report["user_id"], sent.message_id)
     except Exception as e:
-        print(f"Не удалось уведомить студента: {e}")
+        logger.error(f"Не удалось уведомить студента: {e}")
 
 
 async def apply_report_status_change(report_id: int, new_status: str, actor) -> bool:
     if new_status not in STATUSES:
         return False
 
-    report = update_report_status_in_db(report_id, new_status)
+    report = await update_report_status_in_db_async(report_id, new_status)
     if not report:
         return False
 
@@ -643,7 +754,7 @@ async def apply_report_status_change(report_id: int, new_status: str, actor) -> 
 
 
 async def send_reply_to_student_from_admin(report_id: int, message_text: str, actor) -> bool:
-    report = get_report(report_id)
+    report = await get_report_async(report_id)
     if not report or not report["user_id"]:
         return False
 
@@ -656,9 +767,9 @@ async def send_reply_to_student_from_admin(report_id: int, message_text: str, ac
                 "Ответьте на это сообщение, если хотите продолжить диалог."
             ),
         )
-        save_student_report_message(report_id, report["user_id"], sent.message_id)
+        await save_student_report_message(report_id, report["user_id"], sent.message_id)
     except Exception as e:
-        print(f"Не удалось отправить сообщение студенту: {e}")
+        logger.error(f"Не удалось отправить сообщение студенту: {e}")
         return False
 
     log_text = (
@@ -672,7 +783,7 @@ async def send_reply_to_student_from_admin(report_id: int, message_text: str, ac
         try:
             await telegram_app.bot.send_message(chat_id=admin_id, text=log_text)
         except Exception as e:
-            print(f"Ошибка отправки лога: {e}")
+            logger.error(f"Ошибка отправки лога: {e}")
 
     return True
 
@@ -716,7 +827,7 @@ def build_reports_excel(rows: list[dict]) -> BytesIO:
             value = str(cell.value) if cell.value is not None else ""
             if len(value) > max_length:
                 max_length = len(value)
-        ws.column_dimensions[column_letter].width = min(max_length + 2, 40)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 40)
 
     file_stream = BytesIO()
     wb.save(file_stream)
@@ -799,16 +910,16 @@ async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, created_at, module, status
                 FROM reports
                 WHERE user_id = %s
                 ORDER BY id DESC
                 LIMIT 20
             """, (user.id,))
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
     if not rows:
         await update.message.reply_text("У вас пока нет отправленных заявок.")
@@ -844,9 +955,11 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["group"] = update.message.text.strip()
 
+    # Добавляем в клавиатуру новый шаг: Приемная комиссия
     keyboard = [
         ["Регистрация на дисциплины", "Общежитие"],
-        ["Платежи", "Другое"]
+        ["Платежи", "Приемная комиссия"],
+        ["Другое"]
     ]
 
     await update.message.reply_text(
@@ -897,9 +1010,9 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     created_at = datetime.now()
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
                 """
                 INSERT INTO reports (
                     created_at, user_id, username, name, group_name, module, description, screenshot_file_id, status
@@ -919,8 +1032,8 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Новая",
                 )
             )
-            report_id = cursor.fetchone()["id"]
-        conn.commit()
+            report_id = (await cursor.fetchone())["id"]
+        await conn.commit()
 
     report_text = build_report_text(
         report_id=report_id,
@@ -934,7 +1047,8 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         username=user.username if user else None,
     )
 
-    keyboard = build_inline_keyboard(report_id, "Новая")
+    # Передаем модуль в клавиатуру
+    keyboard = build_inline_keyboard(report_id, "Новая", context.user_data["module"])
     recipients = ADMIN_IDS.union(DEVELOPER_IDS)
 
     for staff_id in recipients:
@@ -952,9 +1066,9 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=report_text,
                     reply_markup=keyboard
                 )
-            save_report_message(report_id, staff_id, staff_message.message_id)
+            await save_report_message(report_id, staff_id, staff_message.message_id)
         except Exception as e:
-            print(f"Ошибка отправки сотруднику {staff_id}: {e}")
+            logger.error(f"Ошибка отправки сотруднику {staff_id}: {e}")
 
     await update.message.reply_text(
         "✅ Ваша заявка успешно отправлена!\n\n"
@@ -1007,15 +1121,15 @@ async def list_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет доступа к этой команде.")
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, created_at, name, group_name, module, description, status
                 FROM reports
                 ORDER BY id DESC
                 LIMIT 10
             """)
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
     if not rows:
         await update.message.reply_text("Заявок пока нет.")
@@ -1034,9 +1148,9 @@ async def list_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         report_message = await update.message.reply_text(
             text,
-            reply_markup=build_inline_keyboard(row["id"], row["status"])
+            reply_markup=build_inline_keyboard(row["id"], row["status"], row["module"])
         )
-        save_report_message(row["id"], report_message.chat_id, report_message.message_id)
+        await save_report_message(row["id"], report_message.chat_id, report_message.message_id)
 
 
 async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1045,15 +1159,15 @@ async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У вас нет доступа к этой команде.")
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, created_at, name, group_name, module, description
                 FROM reports
                 WHERE status = %s
                 ORDER BY id DESC
             """, ("Новая",))
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
     if not rows:
         await update.message.reply_text("Новых заявок нет. Все заявки уже взяты в работу или закрыты.")
@@ -1071,20 +1185,20 @@ async def new_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         report_message = await update.message.reply_text(
             text,
-            reply_markup=build_inline_keyboard(row["id"], "Новая")
+            reply_markup=build_inline_keyboard(row["id"], "Новая", row["module"])
         )
-        save_report_message(row["id"], report_message.chat_id, report_message.message_id)
+        await save_report_message(row["id"], report_message.chat_id, report_message.message_id)
 
 
 async def send_full_report(update: Update, context: ContextTypes.DEFAULT_TYPE, report_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, created_at, user_id, username, name, group_name, module, description, screenshot_file_id, status
                 FROM reports
                 WHERE id = %s
             """, (report_id,))
-            row = cursor.fetchone()
+            row = await cursor.fetchone()
 
     if not row:
         await update.message.reply_text("Заявка с таким ID не найдена.")
@@ -1146,16 +1260,16 @@ async def filter_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     module_name = " ".join(context.args).strip()
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, created_at, name, group_name, status
                 FROM reports
                 WHERE module = %s
                 ORDER BY id DESC
                 LIMIT 20
             """, (module_name,))
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
     if not rows:
         await update.message.reply_text(f"По модулю '{module_name}' заявок нет.")
@@ -1201,20 +1315,20 @@ async def set_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Недопустимый статус.")
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
-            report = cursor.fetchone()
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
+            report = await cursor.fetchone()
 
             if not report:
                 await update.message.reply_text("Заявка с таким ID не найдена.")
                 return
 
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE reports SET status = %s WHERE id = %s",
                 (new_status, report_id)
             )
-        conn.commit()
+        await conn.commit()
 
     await update.message.reply_text(
         f"Статус заявки #{report_id} изменён на: {new_status}"
@@ -1245,24 +1359,24 @@ async def take_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ID заявки должен быть числом.")
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
                 FROM reports
                 WHERE id = %s
             """, (report_id,))
-            row = cursor.fetchone()
+            row = await cursor.fetchone()
 
             if not row:
                 await update.message.reply_text("Заявка не найдена.")
                 return
 
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE reports SET status = %s WHERE id = %s",
                 ("В работе", report_id)
             )
-        conn.commit()
+        await conn.commit()
 
     await update.message.reply_text(f"🛠 Заявка #{report_id} переведена в статус: В работе")
     await sync_report_keyboards(context, report_id, "В работе")
@@ -1292,24 +1406,24 @@ async def resolve_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ID заявки должен быть числом.")
         return
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
                 FROM reports
                 WHERE id = %s
             """, (report_id,))
-            row = cursor.fetchone()
+            row = await cursor.fetchone()
 
             if not row:
                 await update.message.reply_text("Заявка не найдена.")
                 return
 
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE reports SET status = %s WHERE id = %s",
                 ("Решено", report_id)
             )
-        conn.commit()
+        await conn.commit()
 
     await update.message.reply_text(f"✅ Заявка #{report_id} переведена в статус: Решено")
     await sync_report_keyboards(context, report_id, "Решено")
@@ -1329,7 +1443,9 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Только админ может выгружать Excel.")
         return
 
-    file_stream = build_reports_excel(get_reports(limit=None))
+    # Запускаем в синхронном режиме, т.к. это тяжелая выгрузка
+    reports_list = get_reports(limit=None)
+    file_stream = build_reports_excel(reports_list)
 
     await update.message.reply_document(
         document=file_stream,
@@ -1352,31 +1468,93 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
 
-    if data.startswith("take_"):
+    if data.startswith("template_"):
         report_id = int(data.split("_")[1])
-        save_report_message(report_id, query.message.chat_id, query.message.message_id)
+        await save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
-        with get_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
+        # 1. Обновляем статус в БД на "Решено"
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
                     SELECT id, user_id, module, name, group_name, status
                     FROM reports
                     WHERE id = %s
                 """, (report_id,))
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
 
                 if not row:
                     await query.message.reply_text("Заявка не найдена.")
                     return
 
-                cursor.execute(
+                await cursor.execute(
+                    "UPDATE reports SET status = %s WHERE id = %s",
+                    ("Решено", report_id)
+                )
+            await conn.commit()
+
+        # 2. Отправляем студенту шаблонный ответ
+        if row["user_id"]:
+            # Шаблон ответа (в будущем поменяем текст здесь)
+            template_text = (
+                f"✉️ Ответ по вашей заявке #{report_id} (Приемная комиссия)\n\n"
+                "Здравствуйте! Всю необходимую информацию вы найдете на нашем официальном сайте:\n"
+                "👉 https://example.com/admission\n\n"
+                "Если у вас остались специфические вопросы, вы можете ответить на это сообщение."
+            )
+            try:
+                sent = await context.bot.send_message(
+                    chat_id=row["user_id"],
+                    text=template_text,
+                )
+                await save_student_report_message(report_id, row["user_id"], sent.message_id)
+            except Exception as e:
+                logger.error(f"Не удалось отправить шаблонный ответ студенту: {e}")
+
+        # 3. Обновляем клавиатуры у админов
+        await query.edit_message_reply_markup(
+            reply_markup=build_inline_keyboard(report_id, "Решено", row["module"])
+        )
+        await sync_report_keyboards(
+            context,
+            report_id,
+            "Решено",
+            skip_chat_id=query.message.chat_id,
+            skip_message_id=query.message.message_id,
+        )
+        await query.message.reply_text(f"✅ Для заявки #{report_id} отправлен шаблонный ответ.")
+        await notify_admins_status_change(
+            context=context,
+            report_id=report_id,
+            module=row["module"],
+            new_status="Решено",
+            actor=user,
+        )
+
+    elif data.startswith("take_"):
+        report_id = int(data.split("_")[1])
+        await save_report_message(report_id, query.message.chat_id, query.message.message_id)
+
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT id, user_id, module, name, group_name, status
+                    FROM reports
+                    WHERE id = %s
+                """, (report_id,))
+                row = await cursor.fetchone()
+
+                if not row:
+                    await query.message.reply_text("Заявка не найдена.")
+                    return
+
+                await cursor.execute(
                     "UPDATE reports SET status = %s WHERE id = %s",
                     ("В работе", report_id)
                 )
-            conn.commit()
+            await conn.commit()
 
         await query.edit_message_reply_markup(
-            reply_markup=build_inline_keyboard(report_id, "В работе")
+            reply_markup=build_inline_keyboard(report_id, "В работе", row["module"])
         )
         await sync_report_keyboards(
             context,
@@ -1397,29 +1575,29 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("done_"):
         report_id = int(data.split("_")[1])
-        save_report_message(report_id, query.message.chat_id, query.message.message_id)
+        await save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
-        with get_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
                     SELECT id, user_id, module, name, group_name, status
                     FROM reports
                     WHERE id = %s
                 """, (report_id,))
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
 
                 if not row:
                     await query.message.reply_text("Заявка не найдена.")
                     return
 
-                cursor.execute(
+                await cursor.execute(
                     "UPDATE reports SET status = %s WHERE id = %s",
                     ("Решено", report_id)
                 )
-            conn.commit()
+            await conn.commit()
 
         await query.edit_message_reply_markup(
-            reply_markup=build_inline_keyboard(report_id, "Решено")
+            reply_markup=build_inline_keyboard(report_id, "Решено", row["module"])
         )
         await sync_report_keyboards(
             context,
@@ -1447,7 +1625,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# REPLY TO STUDENT + LOG TO YOU
+# REPLY TO STUDENT + LOG
 # =========================
 async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1460,14 +1638,14 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if update.message and update.message.text and not update.message.text.startswith("/"):
-        with get_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
                     SELECT user_id
                     FROM reports
                     WHERE id = %s
                 """, (report_id,))
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
 
         if not row or not row["user_id"]:
             return
@@ -1482,21 +1660,15 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
             )
 
-            save_student_report_message(report_id, row["user_id"], sent.message_id)
+            await save_student_report_message(report_id, row["user_id"], sent.message_id)
 
+            username_str = f"@{user.username}" if user.username else "-"
             log_text = (
                 "📩 Сотрудник ответил студенту\n\n"
                 f"👤 Отправитель: {user.full_name}\n"
                 f"🆔 Telegram ID: {user.id}\n"
-                f"🔗 Username: @{user.username}" if user.username else
-                f"📩 Сотрудник ответил студенту\n\n"
-                f"👤 Отправитель: {user.full_name}\n"
-                f"🆔 Telegram ID: {user.id}\n"
-                f"🔗 Username: -"
-            )
-
-            log_text += (
-                f"\n📌 Заявка: #{report_id}\n\n"
+                f"🔗 Username: {username_str}\n"
+                f"📌 Заявка: #{report_id}\n\n"
                 f"💬 Сообщение:\n{update.message.text}"
             )
 
@@ -1504,12 +1676,12 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 try:
                     await context.bot.send_message(chat_id=admin_id, text=log_text)
                 except Exception as e:
-                    print(f"Ошибка отправки лога: {e}")
+                    logger.error(f"Ошибка отправки лога: {e}")
 
             await update.message.reply_text("Сообщение отправлено студенту ✅")
 
         except Exception as e:
-            print(f"Ошибка отправки студенту: {e}")
+            logger.error(f"Ошибка отправки студенту: {e}")
             await update.message.reply_text("Не удалось отправить ❌")
 
         context.user_data.pop("reply_report_id", None)
@@ -1525,11 +1697,9 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     if is_staff(user.id):
         return
 
-    # если студент сейчас заполняет /report — ничего не пересылаем
     if context.user_data.get("report_in_progress"):
         return
 
-    # служебные кнопки и команды не считаем ответами
     ignored_texts = {
         "Пропустить",
         "Новые заявки",
@@ -1545,20 +1715,20 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     if message.text.strip() in ignored_texts:
         return
 
-    report_id = get_report_id_from_student_reply(message)
+    report_id = await get_report_id_from_student_reply(message)
     report = None
 
     if report_id:
-        with get_conn() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
+        async with db_pool.connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
                     SELECT id, module, name, group_name, status
                     FROM reports
                     WHERE id = %s
                 """, (report_id,))
-                report = cursor.fetchone()
+                report = await cursor.fetchone()
     else:
-        report = get_last_active_report_for_user(user.id)
+        report = await get_last_active_report_for_user(user.id)
         if report:
             report_id = report["id"]
 
@@ -1583,10 +1753,10 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_message(
                 chat_id=admin_id,
                 text=text,
-                reply_markup=build_inline_keyboard(report_id, report["status"])
+                reply_markup=build_inline_keyboard(report_id, report["status"], report["module"])
             )
         except Exception as e:
-            print(f"Ошибка пересылки: {e}")
+            logger.error(f"Ошибка пересылки: {e}")
 
     await message.reply_text(
         f"Ваше сообщение по заявке #{report_id} передано сотрудникам ✅"
@@ -1661,16 +1831,16 @@ async def staff_get_report_id(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def staff_get_filter_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
     module_name = update.message.text.strip()
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, created_at, name, group_name, status
                 FROM reports
                 WHERE module = %s
                 ORDER BY id DESC
                 LIMIT 20
             """, (module_name,))
-            rows = cursor.fetchall()
+            rows = await cursor.fetchall()
 
     if not rows:
         await update.message.reply_text(f"По модулю '{module_name}' заявок нет.")
@@ -1708,21 +1878,21 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Недопустимый статус.")
         return STAFF_SET_STATUS_VALUE
 
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
-            report = cursor.fetchone()
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, module FROM reports WHERE id = %s", (report_id,))
+            report = await cursor.fetchone()
 
             if not report:
                 await update.message.reply_text("Заявка с таким ID не найдена.")
                 context.user_data.pop("status_report_id", None)
                 return ConversationHandler.END
 
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE reports SET status = %s WHERE id = %s",
                 (new_status, report_id)
             )
-        conn.commit()
+        await conn.commit()
 
     context.user_data.pop("status_report_id", None)
     await update.message.reply_text(
@@ -1902,14 +2072,17 @@ async def admin_dashboard(request: Request):
     if not admin_username:
         return admin_redirect()
 
+    counts = await get_dashboard_counts_async()
+    recent_reports = await get_reports_async(limit=8)
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
             "request": request,
             "admin_username": admin_username,
-            "counts": get_dashboard_counts(),
-            "recent_reports": get_reports(limit=8),
+            "counts": counts,
+            "recent_reports": recent_reports,
             "statuses": STATUSES,
             "modules": MODULES,
             "active_page": "dashboard",
@@ -1933,7 +2106,7 @@ async def admin_reports(
     if module and module not in MODULES:
         module = None
 
-    reports = get_reports(
+    reports = await get_reports_async(
         status_filter=status,
         module_filter=module,
         search=q,
@@ -1962,7 +2135,8 @@ async def admin_export_reports(request: Request):
     if not get_admin_username(request):
         return admin_redirect()
 
-    file_stream = build_reports_excel(get_reports(limit=None))
+    reports_list = get_reports(limit=None)
+    file_stream = build_reports_excel(reports_list)
     filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         file_stream,
@@ -1977,7 +2151,7 @@ async def admin_report_detail(request: Request, report_id: int):
     if not admin_username:
         return admin_redirect()
 
-    report = get_report(report_id)
+    report = await get_report_async(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
@@ -2002,7 +2176,7 @@ async def admin_report_screenshot(request: Request, report_id: int):
     if not get_admin_username(request):
         return admin_redirect()
 
-    report = get_report(report_id)
+    report = await get_report_async(report_id)
     if not report or not report["screenshot_file_id"]:
         raise HTTPException(status_code=404, detail="Скриншот не найден")
 
@@ -2010,7 +2184,7 @@ async def admin_report_screenshot(request: Request, report_id: int):
         file = await telegram_app.bot.get_file(report["screenshot_file_id"])
         image_bytes = await file.download_as_bytearray()
     except Exception as e:
-        print(f"Не удалось загрузить скриншот заявки #{report_id}: {e}")
+        logger.error(f"Не удалось загрузить скриншот заявки #{report_id}: {e}")
         raise HTTPException(status_code=502, detail="Не удалось загрузить скриншот")
 
     return Response(content=bytes(image_bytes), media_type="image/jpeg")
@@ -2064,24 +2238,24 @@ async def admin_report_reply(
 
 @app.post("/admin/report/{report_id}/take")
 async def admin_take_report(request: Request, report_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
                 FROM reports
                 WHERE id = %s
             """, (report_id,))
-            report = cursor.fetchone()
+            report = await cursor.fetchone()
 
             if not report:
                 return RedirectResponse(url="/admin", status_code=303)
 
-            cursor.execute("""
+            await cursor.execute("""
                 UPDATE reports
                 SET status = %s
                 WHERE id = %s
             """, ("В работе", report_id))
-        conn.commit()
+        await conn.commit()
 
     await notify_student_status(report, report_id, "В работе")
     return RedirectResponse(url="/admin", status_code=303)
@@ -2089,24 +2263,24 @@ async def admin_take_report(request: Request, report_id: int):
 
 @app.post("/admin/report/{report_id}/resolve")
 async def admin_resolve_report(request: Request, report_id: int):
-    with get_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
+    async with db_pool.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
                 SELECT id, user_id, module, name, group_name, status
                 FROM reports
                 WHERE id = %s
             """, (report_id,))
-            report = cursor.fetchone()
+            report = await cursor.fetchone()
 
             if not report:
                 return RedirectResponse(url="/admin", status_code=303)
 
-            cursor.execute("""
+            await cursor.execute("""
                 UPDATE reports
                 SET status = %s
                 WHERE id = %s
             """, ("Решено", report_id))
-        conn.commit()
+        await conn.commit()
 
     await notify_student_status(report, report_id, "Решено")
     return RedirectResponse(url="/admin", status_code=303)
@@ -2114,7 +2288,8 @@ async def admin_resolve_report(request: Request, report_id: int):
 
 @app.on_event("startup")
 async def on_startup():
-    init_db()
+    await db_pool.open()  # Инициализация пула коннектов
+    await init_db()
     await telegram_app.initialize()
     await telegram_app.start()
     await set_commands(telegram_app)
@@ -2124,6 +2299,7 @@ async def on_startup():
 async def on_shutdown():
     await telegram_app.stop()
     await telegram_app.shutdown()
+    await db_pool.close()  # Закрываем пул соединений при выключении
 
 
 @app.get("/")
