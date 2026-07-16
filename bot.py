@@ -142,41 +142,6 @@ async def init_db():
         await conn.commit()
 
 
-async def init_db():
-    async with await get_conn_async() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS reports (
-                    id SERIAL PRIMARY KEY,
-                    created_at TIMESTAMP NOT NULL,
-                    user_id BIGINT,
-                    username TEXT,
-                    name TEXT NOT NULL,
-                    group_name TEXT NOT NULL,
-                    module TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    screenshot_file_id TEXT,
-                    status TEXT NOT NULL DEFAULT 'Новая'
-                )
-            """)
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS report_messages (
-                    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
-                    chat_id BIGINT NOT NULL,
-                    message_id BIGINT NOT NULL,
-                    PRIMARY KEY (report_id, chat_id, message_id)
-                )
-            """)
-            await cursor.execute("""
-                CREATE TABLE IF NOT EXISTS student_report_messages (
-                    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
-                    chat_id BIGINT NOT NULL,
-                    message_id BIGINT NOT NULL,
-                    PRIMARY KEY (report_id, chat_id, message_id)
-                )
-            """)
-        await conn.commit()
-
 
 # Вспомогательная синхронная обертка для вызовов, где async невозможен (например, рендеринг Excel в FastAPI потоке)
 def get_sync_conn():
@@ -772,28 +737,32 @@ async def notify_student_status(report: dict, report_id: int, new_status: str):
     except Exception as e:
         logger.error(f"Не удалось уведомить студента: {e}")
 
+async def apply_report_status_change(report_id: int, new_status: str, actor, silent: bool = False) -> bool:
+    """
+    Глобальная функция изменения статуса заявки.
+    Обновляет БД, синхронизирует кнопки у админов в TG, логирует действие и уведомляет студента.
+    """
+    report = await update_report_status_in_db_async(report_id, new_status)
+    if not report:
+        return False
 
-@app.post("/admin/reports/bulk-action")
-async def admin_reports_bulk_action(
-    request: Request,
-    action: str = Form(...),
-    report_ids: list[int] = Form(default=[]),
-):
-    admin_username = get_admin_username(request)
-    if not admin_username:
-        return admin_redirect()
-
-    if not report_ids:
-        return RedirectResponse(url="/admin/reports?message=no_selected", status_code=303)
-
-    target_status = "В работе" if action == "take" else "Решено"
-
-    for r_id in report_ids:
-        # Передаем silent=True, чтобы не спамить студентам в личку при массовой обработке
-        await apply_report_status_change(r_id, target_status, WebActor(admin_username), silent=True)
-
-    return RedirectResponse(url=f"/admin/reports?message=bulk_success", status_code=303)
-
+    # Синхронизируем inline-кнопки во всех чатах админов
+    await sync_report_keyboards(telegram_app, report_id, new_status)
+    
+    # Логируем действие в чаты суперадминов и админов
+    await notify_admins_status_change(
+        context=telegram_app,
+        report_id=report_id,
+        module=report["module"],
+        new_status=new_status,
+        actor=actor,
+    )
+    
+    # Отправляем уведомление студенту в ЛС (если не включен тихий режим)
+    if not silent:
+        await notify_student_status(report, report_id, new_status)
+        
+    return True
 
 async def send_reply_to_student_from_admin(report_id: int, message_text: str, actor) -> bool:
     report = await get_report_async(report_id)
@@ -2193,30 +2162,19 @@ async def admin_reports(
         },
     )
 
-    return templates.TemplateResponse(
-        request,
-        "reports.html",
-        {
-            "request": request,
-            "admin_username": admin_username,
-            "reports": reports,
-            "statuses": STATUSES,
-            "modules": MODULES,
-            "selected_status": status or "",
-            "selected_module": module or "",
-            "query": q or "",
-            "active_page": "reports",
-        },
-    )
-
-
+import asyncio
 @app.get("/admin/reports/export.xlsx")
 async def admin_export_reports(request: Request):
     if not get_admin_username(request):
         return admin_redirect()
 
-    reports_list = get_reports(limit=None)
-    file_stream = build_reports_excel(reports_list)
+    # Запрашиваем данные асинхронно из БД
+    reports_list = await get_reports_async(limit=None)
+    
+    # Выносим синхронное создание Excel-файла в фоновый поток, чтобы не блокировать асинхронный цикл событий
+    loop = asyncio.get_running_loop()
+    file_stream = await loop.run_in_executor(None, build_reports_excel, reports_list)
+    
     filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
         file_stream,
@@ -2318,51 +2276,23 @@ async def admin_report_reply(
 
 @app.post("/admin/report/{report_id}/take")
 async def admin_take_report(request: Request, report_id: int):
-    async with await get_conn_async() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-                SELECT id, user_id, module, name, group_name, status
-                FROM reports
-                WHERE id = %s
-            """, (report_id,))
-            report = await cursor.fetchone()
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
 
-            if not report:
-                return RedirectResponse(url="/admin", status_code=303)
-
-            await cursor.execute("""
-                UPDATE reports
-                SET status = %s
-                WHERE id = %s
-            """, ("В работе", report_id))
-        await conn.commit()
-
-    await notify_student_status(report, report_id, "В работе")
+    # Переводим статус в "В работе" через безопасную функцию
+    await apply_report_status_change(report_id, "В работе", WebActor(admin_username))
     return RedirectResponse(url="/admin", status_code=303)
 
 
 @app.post("/admin/report/{report_id}/resolve")
 async def admin_resolve_report(request: Request, report_id: int):
-    async with await get_conn_async() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-                SELECT id, user_id, module, name, group_name, status
-                FROM reports
-                WHERE id = %s
-            """, (report_id,))
-            report = await cursor.fetchone()
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
 
-            if not report:
-                return RedirectResponse(url="/admin", status_code=303)
-
-            await cursor.execute("""
-                UPDATE reports
-                SET status = %s
-                WHERE id = %s
-            """, ("Решено", report_id))
-        await conn.commit()
-
-    await notify_student_status(report, report_id, "Решено")
+    # Переводим статус в "Решено" через безопасную функцию
+    await apply_report_status_change(report_id, "Решено", WebActor(admin_username))
     return RedirectResponse(url="/admin", status_code=303)
 
 
