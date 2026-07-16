@@ -2145,11 +2145,29 @@ async def admin_reports(
     if module and module not in MODULES:
         module = None
 
+    # Исправлено: теперь гарантированно вызывается асинхронная версия
     reports = await get_reports_async(
         status_filter=status,
         module_filter=module,
         search=q,
         limit=None,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "reports.html",
+        {
+            "request": request,
+            "admin_username": admin_username,
+            "reports": reports,
+            "statuses": STATUSES,
+            "modules": MODULES,
+            "selected_status": status or "",
+            "selected_module": module or "",
+            "query": q or "",
+            "active_page": "reports",
+            "message": request.query_params.get("message"),
+        },
     )
 
     return templates.TemplateResponse(
@@ -2299,6 +2317,25 @@ async def admin_take_report(request: Request, report_id: int):
     await notify_student_status(report, report_id, "В работе")
     return RedirectResponse(url="/admin", status_code=303)
 
+@app.post("/admin/reports/bulk-action")
+async def admin_reports_bulk_action(
+    request: Request,
+    action: str = Form(...),
+    report_ids: list[int] = Form(default=[]),
+):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+
+    if not report_ids:
+        return RedirectResponse(url="/admin/reports?message=no_selected", status_code=303)
+
+    target_status = "В работе" if action == "take" else "Решено"
+
+    for r_id in report_ids:
+        await apply_report_status_change(r_id, target_status, WebActor(admin_username))
+
+    return RedirectResponse(url=f"/admin/reports?message=bulk_success", status_code=303)
 
 @app.post("/admin/report/{report_id}/resolve")
 async def admin_resolve_report(request: Request, report_id: int):

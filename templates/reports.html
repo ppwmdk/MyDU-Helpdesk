@@ -1,111 +1,235 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Все заявки | MyDU Helpdesk</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .navbar-brand { font-weight: 700; letter-spacing: 0.5px; }
+        .bulk-actions-panel {
+            display: none; /* Показывается только когда выбран хотя бы один чекбокс */
+        }
+    </style>
+</head>
+<body>
 
-{% block title %}Заявки{% endblock %}
-
-{% block content %}
-<section class="heading-row">
-    <div>
-        <h1>Все заявки</h1>
-        <p>Фильтры, поиск и быстрые действия.</p>
-    </div>
-    <a class="primary-link" href="/admin/reports/export.xlsx">Скачать Excel</a>
-</section>
-
-<form method="get" action="/admin/reports" class="filters">
-    <label>
-        Статус
-        <select name="status">
-            <option value="">Все</option>
-            {% for status in statuses %}
-                <option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status }}</option>
-            {% endfor %}
-        </select>
-    </label>
-    <label>
-        Модуль
-        <select name="module">
-            <option value="">Все</option>
-            {% for module in modules %}
-                <option value="{{ module }}" {% if selected_module == module %}selected{% endif %}>{{ module }}</option>
-            {% endfor %}
-        </select>
-    </label>
-    <label>
-        Поиск
-        <input name="q" value="{{ query }}" placeholder="ID, ФИО, группа, username">
-    </label>
-    <button type="submit" class="primary-button">Показать</button>
-    <a class="ghost-link" href="/admin/reports">Сбросить</a>
-</form>
-
-<td>
-    <a href="/admin/reports/{{ report.id }}">Открыть</a><br>
-
-    {% if report.status != "В работе" and report.status != "Решено" %}
-    <form method="post" action="/admin/report/{{ report.id }}/take" style="display:inline;">
-        <button type="submit">В работу</button>
-    </form>
-    {% endif %}
-
-    {% if report.status != "Решено" %}
-    <form method="post" action="/admin/report/{{ report.id }}/resolve" style="display:inline;">
-        <button type="submit">Решено</button>
-    </form>
-    {% endif %}
-</td>
-
-<section class="section-block">
-    {% if reports %}
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Дата</th>
-                        <th>Студент</th>
-                        <th>Модуль</th>
-                        <th>Описание</th>
-                        <th>Статус</th>
-                        <th>Действия</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for report in reports %}
-                        <tr>
-                            <td>#{{ report.id }}</td>
-                            <td>{{ report.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td>
-                                {{ report.name }}<br>
-                                <span>{{ report.group_name }}</span>
-                                {% if report.username %}<br><span>@{{ report.username }}</span>{% endif %}
-                            </td>
-                            <td>{{ report.module }}</td>
-                            <td class="description-cell">{{ report.description }}</td>
-                            <td><span class="badge {{ report.status }}">{{ report.status }}</span></td>
-                            <td class="actions">
-                                {% if report.status == 'Новая' %}
-                                    <form method="post" action="/admin/reports/{{ report.id }}/status">
-                                        <input type="hidden" name="status" value="В работе">
-                                        <input type="hidden" name="next_url" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
-                                        <button type="submit">В работу</button>
-                                    </form>
-                                {% endif %}
-                                {% if report.status != 'Решено' %}
-                                    <form method="post" action="/admin/reports/{{ report.id }}/status">
-                                        <input type="hidden" name="status" value="Решено">
-                                        <input type="hidden" name="next_url" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
-                                        <button type="submit">Решено</button>
-                                    </form>
-                                {% endif %}
-                                <a class="small-link" href="/admin/reports/{{ report.id }}">Открыть</a>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+    <!-- Навигация -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 shadow-sm">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center" href="/admin">
+                <i class="bi bi-shield-lock-fill me-2 text-primary"></i> MyDU Helpdesk
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin"><i class="bi bi-house-door me-1"></i> Главная</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/admin/reports"><i class="bi bi-list-task me-1"></i> Все заявки</a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center text-light">
+                    <span class="me-3"><i class="bi bi-person-circle me-1"></i> {{ admin_username }}</span>
+                    <form action="/admin/logout" method="POST" class="m-0">
+                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                            <i class="bi bi-box-arrow-right"></i> Выйти
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
-    {% else %}
-        <p class="empty">По этим условиям заявок нет.</p>
-    {% endif %}
-</section>
-{% endblock %}
+    </nav>
+
+    <div class="container mb-5">
+        
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2 mb-0">Список всех заявок</h1>
+            <a href="/admin/reports/export.xlsx" class="btn btn-success">
+                <i class="bi bi-file-earmark-excel me-1"></i> Скачать Excel
+            </a>
+        </div>
+
+        <!-- Сообщения об успешных операциях -->
+        {% if request.query_params.get('message') == 'bulk_success' %}
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="bi bi-check-circle-fill me-2"></i> Статусы выбранных заявок успешно изменены!
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% elif request.query_params.get('message') == 'no_selected' %}
+            <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i> Вы не выбрали ни одной заявки.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endif %}
+
+        <!-- Фильтры и Поиск -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <form method="GET" action="/admin/reports" class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label text-muted small fw-bold">Поиск</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-white border-end-0 text-muted">
+                                <i class="bi bi-search"></i>
+                            </span>
+                            <input type="text" name="q" class="form-control border-start-0" placeholder="ФИО, группа, ID..." value="{{ query }}">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small fw-bold">Статус</label>
+                        <select name="status" class="form-select">
+                            <option value="">Все статусы</option>
+                            {% for st in statuses %}
+                                <option value="{{ st }}" {% if selected_status == st %}selected{% endif %}>{{ st }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label text-muted small fw-bold">Модуль</label>
+                        <select name="module" class="form-select">
+                            <option value="">Все модули</option>
+                            {% for mod in modules %}
+                                <option value="{{ mod }}" {% if selected_module == mod %}selected{% endif %}>{{ mod }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary w-100">Применить</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Форма массовых действий -->
+        <form id="bulkForm" action="/admin/reports/bulk-action" method="POST">
+            
+            <!-- Всплывающая панель массовых действий -->
+            <div id="bulkPanel" class="card border-0 shadow-sm mb-4 bg-dark text-white bulk-actions-panel">
+                <div class="card-body d-flex align-items-center justify-content-between py-3">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-check2-square text-primary fs-4 me-3"></i>
+                        <span>Выбрано заявок: <strong id="selectedCount" class="text-primary">0</strong></span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" name="action" value="take" class="btn btn-warning btn-sm text-dark fw-bold">
+                            <i class="bi bi-play-fill me-1"></i> В работу
+                        </button>
+                        <button type="submit" name="action" value="resolve" class="btn btn-success btn-sm fw-bold">
+                            <i class="bi bi-check-lg me-1"></i> Решить выбранные
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Таблица заявок -->
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3" style="width: 50px;">
+                                        <input class="form-check-input" type="checkbox" id="selectAll">
+                                    </th>
+                                    <th style="width: 80px;">ID</th>
+                                    <th style="width: 150px;">Дата</th>
+                                    <th>Студент / Описание</th>
+                                    <th style="width: 200px;">Модуль</th>
+                                    <th style="width: 120px;">Статус</th>
+                                    <th class="text-end pe-3" style="width: 200px;">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if reports %}
+                                    {% for report in reports %}
+                                    <tr>
+                                        <td class="ps-3">
+                                            <input class="form-check-input report-checkbox" type="checkbox" name="report_ids" value="{{ report.id }}">
+                                        </td>
+                                        <td class="fw-bold text-muted">#{{ report.id }}</td>
+                                        <td class="text-muted" style="font-size: 0.9rem;">
+                                            {{ report.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                        </td>
+                                        <td>
+                                            <div class="fw-bold">{{ report.name }}</div>
+                                            <div class="text-muted" style="font-size: 0.85rem;">Группа: {{ report.group_name }}</div>
+                                            <div class="text-truncate mt-1 text-secondary" style="max-width: 400px; font-size: 0.9rem;">
+                                                {{ report.description }}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-secondary-subtle text-secondary border px-2 py-1.5">
+                                                {{ report.module }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            {% if report.status == "Новая" %}
+                                                <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2.5 py-1.5">Новая</span>
+                                            {% elif report.status == "В работе" %}
+                                                <span class="badge bg-warning-subtle text-warning border border-warning-subtle px-2.5 py-1.5">В работе</span>
+                                            {% else %}
+                                                <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1.5">Решено</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end pe-3">
+                                            <a href="/admin/reports/{{ report.id }}" class="btn btn-outline-primary btn-sm d-inline-flex align-items-center">
+                                                <i class="bi bi-eye-fill me-1"></i> Открыть
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="7" class="text-center py-5 text-muted">
+                                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                                            Заявки по выбранным фильтрам не найдены
+                                        </td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Скрипт интерактивного выбора и отображения панели управления -->
+    <script>
+        const selectAll = document.getElementById('selectAll');
+        const checkboxes = document.querySelectorAll('.report-checkbox');
+        const bulkPanel = document.getElementById('bulkPanel');
+        const selectedCount = document.getElementById('selectedCount');
+
+        function updateBulkPanel() {
+            const checkedCount = document.querySelectorAll('.report-checkbox:checked').length;
+            if (checkedCount > 0) {
+                bulkPanel.style.display = 'block';
+                selectedCount.textContent = checkedCount;
+            } else {
+                bulkPanel.style.display = 'none';
+            }
+        }
+
+        selectAll.addEventListener('change', function() {
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll.checked;
+            });
+            updateBulkPanel();
+        });
+
+        checkboxes.forEach(cb => {
+            cb.addEventListener('change', updateBulkPanel);
+        });
+    </script>
+</body>
+</html>
