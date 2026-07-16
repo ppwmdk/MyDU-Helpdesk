@@ -767,24 +767,26 @@ async def notify_student_status(report: dict, report_id: int, new_status: str):
         logger.error(f"Не удалось уведомить студента: {e}")
 
 
-async def apply_report_status_change(report_id: int, new_status: str, actor) -> bool:
-    if new_status not in STATUSES:
-        return False
+@app.post("/admin/reports/bulk-action")
+async def admin_reports_bulk_action(
+    request: Request,
+    action: str = Form(...),
+    report_ids: list[int] = Form(default=[]),
+):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
 
-    report = await update_report_status_in_db_async(report_id, new_status)
-    if not report:
-        return False
+    if not report_ids:
+        return RedirectResponse(url="/admin/reports?message=no_selected", status_code=303)
 
-    await sync_report_keyboards(telegram_app, report_id, new_status)
-    await notify_admins_status_change(
-        context=telegram_app,
-        report_id=report_id,
-        module=report["module"],
-        new_status=new_status,
-        actor=actor,
-    )
-    await notify_student_status(report, report_id, new_status)
-    return True
+    target_status = "В работе" if action == "take" else "Решено"
+
+    for r_id in report_ids:
+        # Передаем silent=True, чтобы не спамить студентам в личку при массовой обработке
+        await apply_report_status_change(r_id, target_status, WebActor(admin_username), silent=True)
+
+    return RedirectResponse(url=f"/admin/reports?message=bulk_success", status_code=303)
 
 
 async def send_reply_to_student_from_admin(report_id: int, message_text: str, actor) -> bool:
