@@ -60,6 +60,11 @@ if not TOKEN:
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не найден")
 
+app = FastAPI()
+
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
 ADMIN_IDS = {
     int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()
 }
@@ -2051,10 +2056,6 @@ telegram_app.add_handler(
 # =========================
 # FASTAPI WEBHOOK
 # =========================
-app = FastAPI()
-
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 @app.post("/admin/reports/bulk-action")
 async def admin_reports_bulk_action(
