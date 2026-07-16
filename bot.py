@@ -582,6 +582,7 @@ async def get_dashboard_counts_async() -> dict:
 
 
 # Асинхронная версия получения списка заявок
+# Асинхронная версия получения списка заявок (Исправленная)
 async def get_reports_async(
     status_filter: str | None = None,
     module_filter: str | None = None,
@@ -620,7 +621,7 @@ async def get_reports_async(
     if limit:
         params.append(limit)
 
-    async with await get_conn_async() as conn:
+    async with db_pool.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 f"""
@@ -633,6 +634,7 @@ async def get_reports_async(
                 """,
                 params,
             )
+            # Добавили await сюда, чтобы данные успешно выгружались из БД
             return await cursor.fetchall()
 
 
