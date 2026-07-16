@@ -3,220 +3,244 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Админ-панель | MyDU Helpdesk</title>
-    <!-- Подключаем Bootstrap 5 и иконки напрямую через быстрый CDN -->
+    <title>Панель управления | MyDU Helpdesk</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f8f9fa;
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
         }
-        .navbar-brand {
-            font-weight: 700;
-            letter-spacing: 0.5px;
+        .sidebar {
+            background-color: #0f172a;
+            min-height: 100vh;
+            color: #f8fafc;
+            border-right: 1px solid #1e293b;
         }
-        .card-counter {
+        .sidebar .nav-link {
+            color: #94a3b8;
+            font-weight: 500;
+            padding: 0.8rem 1rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s ease-in-out;
+            margin-bottom: 0.25rem;
+        }
+        .sidebar .nav-link:hover {
+            color: #f8fafc;
+            background-color: #1e293b;
+        }
+        .sidebar .nav-link.active {
+            color: #38bdf8;
+            background-color: #1e293b;
+        }
+        .university-logo {
+            padding: 1.5rem 1rem;
+            border-bottom: 1px solid #1e293b;
+        }
+        .university-logo img {
+            max-height: 45px;
+            object-fit: contain;
+            filter: drop-shadow(0px 0px 3px rgba(255,255,255,0.2));
+        }
+        .card-custom {
+            background: #ffffff;
+            border: none;
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
             transition: transform 0.2s;
         }
-        .card-counter:hover {
-            transform: translateY(-3px);
+        .card-custom:hover {
+            transform: translateY(-2px);
         }
-        .table img {
-            max-width: 80px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        .table img:hover {
-            transform: scale(1.1);
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
         }
     </style>
 </head>
 <body>
 
-    <!-- Навигационная панель -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 shadow-sm">
-        <div class="container">
-            <a class="navbar-brand d-flex align-items-center" href="/admin">
-                <i class="bi bi-shield-lock-fill me-2 text-primary"></i> MyDU Helpdesk
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
+<div class="container-fluid">
+    <div class="row">
+        
+        <!-- SIDEBAR (Левое меню с исправленным лого) -->
+        <nav class="col-md-3 col-lg-2 d-md-block sidebar collapse px-3">
+            <div class="university-logo text-center mb-4">
+                <!-- Новый стабильный CDN-адрес логотипа AITU -->
+                <img src="https://images.squarespace-cdn.com/content/v1/5f3ff43cd3f538356be9d8d1/1601455589178-9M8K2T7I9V84K7G5I6OM/aitu-logo.png" alt="AITU Logo" class="img-fluid">
+                <div class="small text-muted mt-2 fw-semibold" style="letter-spacing: 1px; font-size: 0.75rem; color: #38bdf8 !important;">HELP-DESK</div>
+            </div>
+            
+            <div class="position-sticky pt-2">
+                <ul class="nav flex-column">
                     <li class="nav-item">
-                        <a class="nav-link active" href="/admin"><i class="bi bi-house-door me-1"></i> Главная</a>
+                        <a class="nav-link active" href="/admin">
+                            <i class="bi bi-grid-1x2-fill me-2"></i> Панель управления
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/admin/reports"><i class="bi bi-list-task me-1"></i> Все заявки</a>
+                        <a class="nav-link" href="/admin/reports">
+                            <i class="bi bi-journals me-2"></i> Все заявки
+                        </a>
                     </li>
                 </ul>
-                <div class="d-flex align-items-center text-light">
-                    <span class="me-3"><i class="bi bi-person-circle me-1"></i> {{ admin_username }}</span>
-                    <form action="/admin/logout" method="POST" class="m-0">
-                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                
+                <hr class="my-4" style="border-color: #1e293b;">
+                
+                <div class="px-2 py-3 bg-dark rounded-3 text-center mb-3" style="background-color: #1e293b !important;">
+                    <div class="small text-muted">Вы вошли как:</div>
+                    <div class="fw-bold text-white small text-truncate"><i class="bi bi-person-circle text-primary me-1"></i> {{ admin_username }}</div>
+                    <form action="/admin/logout" method="POST" class="mt-3 m-0">
+                        <button type="submit" class="btn btn-danger btn-sm w-100">
                             <i class="bi bi-box-arrow-right"></i> Выйти
                         </button>
                     </form>
                 </div>
             </div>
-        </div>
-    </nav>
+        </nav>
 
-    <div class="container">
-        
-        <!-- Заголовок -->
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <div>
-                <h1 class="h2 mb-1">Панель управления</h1>
-                <p class="text-muted mb-0">Заявки студентов и быстрые действия.</p>
+        <!-- MAIN CONTENT (Основная область) -->
+        <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 py-4">
+            
+            <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                <div>
+                    <h1 class="h3 fw-bold mb-1">Панель управления</h1>
+                    <p class="text-muted small mb-0">Краткая статистика обращений в поддержку на текущий момент.</p>
+                </div>
             </div>
-            <a href="/admin/reports/export.xlsx" class="btn btn-success shadow-sm">
-                <i class="bi bi-file-earmark-excel me-1"></i> Выгрузить в Excel
-            </a>
-        </div>
 
-        <!-- Карточки статистики -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="card card-counter border-0 shadow-sm bg-primary text-white h-100">
-                    <div class="card-body d-flex align-items-center justify-content-between">
-                        <div>
-                            <h6 class="text-white-50 text-uppercase mb-1" style="font-size: 0.8rem;">Всего заявок</h6>
-                            <h2 class="mb-0 fw-bold">{{ counts.total }}</h2>
+            <!-- Статистика (Карточки) -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">Всего заявок</h6>
+                                <h3 class="fw-bold mb-0">{{ counts.total }}</h3>
+                            </div>
+                            <div class="stat-icon bg-primary-subtle text-primary">
+                                <i class="bi bi-clipboard-data"></i>
+                            </div>
                         </div>
-                        <i class="bi bi-folder2-open fs-1 text-white-50"></i>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">Новые</h6>
+                                <h3 class="fw-bold mb-0 text-danger">{{ counts.new_count }}</h3>
+                            </div>
+                            <div class="stat-icon bg-danger-subtle text-danger">
+                                <i class="bi bi-bell"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">В работе</h6>
+                                <h3 class="fw-bold mb-0 text-warning">{{ counts.in_progress_count }}</h3>
+                            </div>
+                            <div class="stat-icon bg-warning-subtle text-warning">
+                                <i class="bi bi-gear-fill"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-custom p-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <h6 class="text-muted small text-uppercase mb-1">Решено</h6>
+                                <h3 class="fw-bold mb-0 text-success">{{ counts.resolved_count }}</h3>
+                            </div>
+                            <div class="stat-icon bg-success-subtle text-success">
+                                <i class="bi bi-check-circle"></i>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card card-counter border-0 shadow-sm bg-danger text-white h-100">
-                    <div class="card-body d-flex align-items-center justify-content-between">
-                        <div>
-                            <h6 class="text-white-50 text-uppercase mb-1" style="font-size: 0.8rem;">Новые</h6>
-                            <h2 class="mb-0 fw-bold">{{ counts.new_count }}</h2>
-                        </div>
-                        <i class="bi bi-bell-fill fs-1 text-white-50"></i>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card card-counter border-0 shadow-sm bg-warning text-dark h-100">
-                    <div class="card-body d-flex align-items-center justify-content-between">
-                        <div>
-                            <h6 class="text-dark-50 text-uppercase mb-1" style="font-size: 0.8rem; color: rgba(0,0,0,0.5);">В работе</h6>
-                            <h2 class="mb-0 fw-bold">{{ counts.in_progress_count }}</h2>
-                        </div>
-                        <i class="bi bi-gear-wide-connected fs-1" style="color: rgba(0,0,0,0.35);"></i>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card card-counter border-0 shadow-sm bg-success text-white h-100">
-                    <div class="card-body d-flex align-items-center justify-content-between">
-                        <div>
-                            <h6 class="text-white-50 text-uppercase mb-1" style="font-size: 0.8rem;">Решено</h6>
-                            <h2 class="mb-0 fw-bold">{{ counts.resolved_count }}</h2>
-                        </div>
-                        <i class="bi bi-check-circle-fill fs-1 text-white-50"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
 
-        <!-- Раздел "Последние заявки" -->
-        <div class="card border-0 shadow-sm mb-5">
-            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-                <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-clock-history me-2"></i>Последние заявки</h5>
-                <a href="/admin/reports" class="btn btn-outline-primary btn-sm">Открыть все</a>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th class="ps-3" style="width: 80px;">ID</th>
-                                <th style="width: 150px;">Дата</th>
-                                <th>Студент / Описание</th>
-                                <th style="width: 200px;">Модуль</th>
-                                <th style="width: 120px;">Статус</th>
-                                <th class="text-end pe-3" style="width: 280px;">Действия</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% if recent_reports %}
-                                {% for report in recent_reports %}
+            <!-- Список последних заявок -->
+            <div class="card card-custom">
+                <div class="card-header bg-transparent border-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0">Последние обращения</h5>
+                    <a href="/admin/reports" class="btn btn-sm btn-outline-secondary rounded-3">Смотреть все</a>
+                </div>
+                <div class="card-body px-0 pb-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
                                 <tr>
-                                    <td class="ps-3 fw-bold text-muted">#{{ report.id }}</td>
-                                    <td class="text-muted" style="font-size: 0.9rem;">
-                                        {{ report.created_at.strftime('%Y-%m-%d %H:%M') }}
-                                    </td>
-                                    <td>
-                                        <div class="fw-bold">{{ report.name }}</div>
-                                        <div class="text-muted" style="font-size: 0.85rem;">Группа: {{ report.group_name }}</div>
-                                        <div class="text-truncate mt-1 text-secondary" style="max-width: 400px; font-size: 0.9rem;">
-                                            {{ report.description }}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-secondary-subtle text-secondary border px-2 py-1.5">
-                                            {{ report.module }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        {% if report.status == "Новая" %}
-                                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2.5 py-1.5">Новая</span>
-                                        {% elif report.status == "В работе" %}
-                                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle px-2.5 py-1.5">В работе</span>
-                                        {% else %}
-                                            <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1.5">Решено</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-end pe-3">
-                                        <div class="d-flex justify-content-end gap-1">
+                                    <th class="ps-4" style="width: 100px;">ID</th>
+                                    <th>Студент / Группа</th>
+                                    <th>Модуль</th>
+                                    <th>Описание</th>
+                                    <th>Статус</th>
+                                    <th class="text-end pe-4">Действие</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if recent_reports %}
+                                    {% for report in recent_reports %}
+                                    <tr>
+                                        <td class="ps-4 fw-bold text-secondary">#{{ report.id }}</td>
+                                        <td>
+                                            <div class="fw-semibold">{{ report.name }}</div>
+                                            <div class="text-muted small">{{ report.group_name }}</div>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-light text-secondary border rounded-3 fw-medium">
+                                                {{ report.module }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="text-truncate text-secondary" style="max-width: 300px;">
+                                                {{ report.description }}
+                                            </div>
+                                        </td>
+                                        <td>
                                             {% if report.status == "Новая" %}
-                                                <form action="/admin/report/{{ report.id }}/take" method="POST" class="m-0">
-                                                    <button type="submit" class="btn btn-warning btn-sm text-dark d-flex align-items-center">
-                                                        <i class="bi bi-play-fill me-1"></i> В работу
-                                                    </button>
-                                                </form>
-                                                <form action="/admin/report/{{ report.id }}/resolve" method="POST" class="m-0">
-                                                    <button type="submit" class="btn btn-success btn-sm d-flex align-items-center">
-                                                        <i class="bi bi-check-lg me-1"></i> Решено
-                                                    </button>
-                                                </form>
+                                                <span class="badge bg-danger-subtle text-danger px-2.5 py-1.5 rounded-pill" style="font-size: 0.75rem;">Новая</span>
                                             {% elif report.status == "В работе" %}
-                                                <form action="/admin/report/{{ report.id }}/resolve" method="POST" class="m-0">
-                                                    <button type="submit" class="btn btn-success btn-sm d-flex align-items-center">
-                                                        <i class="bi bi-check-lg me-1"></i> Решено
-                                                    </button>
-                                                </form>
+                                                <span class="badge bg-warning-subtle text-warning px-2.5 py-1.5 rounded-pill" style="font-size: 0.75rem;">В работе</span>
+                                            {% else %}
+                                                <span class="badge bg-success-subtle text-success px-2.5 py-1.5 rounded-pill" style="font-size: 0.75rem;">Решено</span>
                                             {% endif %}
-                                            <a href="/admin/reports/{{ report.id }}" class="btn btn-outline-primary btn-sm d-flex align-items-center">
-                                                <i class="bi bi-eye-fill me-1"></i> Открыть
+                                        </td>
+                                        <td class="text-end pe-4">
+                                            <a href="/admin/reports/{{ report.id }}" class="btn btn-sm btn-outline-primary rounded-3">
+                                                Открыть
                                             </a>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            {% else %}
-                                <tr>
-                                    <td colspan="6" class="text-center py-5 text-muted">
-                                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                                        Заявок пока нет
-                                    </td>
-                                </tr>
-                            {% endif %}
-                        </tbody>
-                    </table>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4 text-muted">Заявок пока нет</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-        </div>
 
+        </main>
     </div>
+</div>
 
-    <!-- Скрипты Bootstrap -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
