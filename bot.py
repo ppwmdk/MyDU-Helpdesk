@@ -2098,31 +2098,7 @@ async def admin_logout():
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_dashboard(request: Request):
-    admin_username = get_admin_username(request)
-    if not admin_username:
-        return admin_redirect()
-
-    counts = await get_dashboard_counts_async()
-    recent_reports = await get_reports_async(limit=8)
-
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "request": request,
-            "admin_username": admin_username,
-            "counts": counts,
-            "recent_reports": recent_reports,
-            "statuses": STATUSES,
-            "modules": MODULES,
-            "active_page": "dashboard",
-        },
-    )
-
-
-@app.get("/admin/reports", response_class=HTMLResponse)
-async def admin_reports(
+async def admin_dashboard(
     request: Request,
     status: str | None = None,
     module: str | None = None,
@@ -2137,30 +2113,40 @@ async def admin_reports(
     if module and module not in MODULES:
         module = None
 
-    # Исправлено: теперь гарантированно вызывается асинхронная версия
+    # Подтягиваем общую статистику для карточек
+    counts = await get_dashboard_counts_async()
+    
+    # Подтягиваем список заявок с учетом живых фильтров и поиска
     reports = await get_reports_async(
         status_filter=status,
         module_filter=module,
         search=q,
-        limit=None,
+        limit=None, # Выводим все подходящие заявки
     )
 
     return templates.TemplateResponse(
         request,
-        "reports.html",
+        "dashboard.html",
         {
             "request": request,
             "admin_username": admin_username,
+            "counts": counts,
             "reports": reports,
             "statuses": STATUSES,
             "modules": MODULES,
             "selected_status": status or "",
             "selected_module": module or "",
             "query": q or "",
-            "active_page": "reports",
+            "active_page": "dashboard",
             "message": request.query_params.get("message"),
         },
     )
+
+
+@app.get("/admin/reports")
+async def admin_reports(request: Request):
+    # Автоматически перенаправляем на главную панель, так как мы объединили интерфейс
+    return RedirectResponse(url="/admin", status_code=303)
 
 import asyncio
 @app.get("/admin/reports/export.xlsx")
