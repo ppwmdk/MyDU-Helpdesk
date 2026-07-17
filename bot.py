@@ -2,6 +2,7 @@ import os
 import re
 import hmac
 import time
+import math
 import hashlib
 import logging
 from datetime import datetime
@@ -2114,7 +2115,6 @@ async def admin_logout():
 
 
 @app.get("/admin", response_class=HTMLResponse)
-import math
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(
