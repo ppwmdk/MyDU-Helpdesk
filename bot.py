@@ -551,8 +551,13 @@ async def get_reports_async(
     status_filter: str | None = None,
     module_filter: str | None = None,
     search: str | None = None,
-    limit: int | None = 100,
-) -> list[dict]:
+    page: int = 1,
+    per_page: int = 20,
+) -> tuple[list[dict], int]:
+    """
+    Асинхронное получение списка заявок с пагинацией и фильтрами.
+    Возвращает кортеж: (список_заявок, общее_количество_строк_по_фильтру)
+    """
     conditions = []
     params = []
 
@@ -581,11 +586,20 @@ async def get_reports_async(
             params.extend([like_value] * 6)
 
     where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    limit_sql = "LIMIT %s" if limit else ""
-    if limit:
-        params.append(limit)
+    
+    # 1. Сначала считаем общее количество подходящих записей (для пагинации)
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(f"SELECT COUNT(*) FROM reports {where_sql}", params)
+            total_records = (await cursor.fetchone())["count"]
 
-    # ИСПОЛЬЗУЕМ КОРРЕКТНЫЙ get_conn_async() вместо удаленного db_pool!
+    # 2. Вычисляем смещение (OFFSET) для текущей страницы
+    offset = (page - 1) * per_page
+    
+    # Добавляем LIMIT и OFFSET в параметры для основного запроса
+    main_params = params.copy()
+    main_params.extend([per_page, offset])
+
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
@@ -595,11 +609,13 @@ async def get_reports_async(
                 FROM reports
                 {where_sql}
                 ORDER BY id DESC
-                {limit_sql}
+                LIMIT %s OFFSET %s
                 """,
-                params,
+                main_params,
             )
-            return await cursor.fetchall()
+            reports = await cursor.fetchall()
+
+    return reports, total_records
 
 
 # Синхронная версия для обратной совместимости в синхронных роутах FastAPI / openpyxl
@@ -2098,11 +2114,15 @@ async def admin_logout():
 
 
 @app.get("/admin", response_class=HTMLResponse)
+import math
+
+@app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(
     request: Request,
     status: str | None = None,
     module: str | None = None,
     q: str | None = None,
+    page: int = 1,
 ):
     admin_username = get_admin_username(request)
     if not admin_username:
@@ -2112,17 +2132,26 @@ async def admin_dashboard(
         status = None
     if module and module not in MODULES:
         module = None
+    if page < 1:
+        page = 1
 
-    # Подтягиваем общую статистику для карточек
+    # Задаем лимит записей на одну страницу
+    per_page = 20
+
+    # Общая статистика для верхних карточек
     counts = await get_dashboard_counts_async()
     
-    # Подтягиваем список заявок с учетом живых фильтров и поиска
-    reports = await get_reports_async(
+    # Извлекаем данные и общее число отфильтрованных записей
+    reports, total_filtered = await get_reports_async(
         status_filter=status,
         module_filter=module,
         search=q,
-        limit=None, # Выводим все подходящие заявки
+        page=page,
+        per_page=per_page
     )
+
+    # Рассчитываем общее количество страниц
+    total_pages = math.ceil(total_filtered / per_page) if total_filtered > 0 else 1
 
     return templates.TemplateResponse(
         request,
@@ -2139,6 +2168,9 @@ async def admin_dashboard(
             "query": q or "",
             "active_page": "dashboard",
             "message": request.query_params.get("message"),
+            "current_page": page,
+            "total_pages": total_pages,
+            "total_filtered": total_filtered
         },
     )
 
