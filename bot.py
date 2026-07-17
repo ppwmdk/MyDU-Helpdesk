@@ -5,6 +5,7 @@ import time
 import math
 import hashlib
 import logging
+import asyncio
 from datetime import datetime
 from io import BytesIO
 
@@ -77,7 +78,7 @@ SUPER_ADMIN_IDS = {
     548200976
 }
 
-NAME, GROUP, MODULE, DESCRIPTION, SCREENSHOT = range(5)
+NAME, GROUP, MODULE, ACADEMIC_STATUS, DESCRIPTION, SCREENSHOT = range(6)
 STAFF_REPORT_ID = 100
 STAFF_FILTER_MODULE = 101
 STAFF_SET_STATUS_ID = 102
@@ -98,7 +99,6 @@ STATUSES = ["Новая", "В работе", "Решено"]
 # =========================
 # DATABASE & ASYNC POOL
 # =========================
-# Создаем асинхронный пул соединений. Минимальный размер 1, максимальный 10 коннектов.
 async def get_conn_async():
     return await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
 
@@ -141,12 +141,6 @@ async def init_db():
                 )
             """)
         await conn.commit()
-
-
-
-# Вспомогательная синхронная обертка для вызовов, где async невозможен (например, рендеринг Excel в FastAPI потоке)
-def get_sync_conn():
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
 # =========================
@@ -203,7 +197,6 @@ def build_inline_keyboard(report_id: int, status: str = "Новая", module: st
     rows = []
 
     if module == "Приемная комиссия" and status == "Новая":
-        # Специальная логика для Приемной комиссии
         rows.append([
             InlineKeyboardButton("📨 Шаблонный ответ", callback_data=f"template_{report_id}"),
             InlineKeyboardButton("✉️ Ответить вручную", callback_data=f"reply_{report_id}")
@@ -213,7 +206,6 @@ def build_inline_keyboard(report_id: int, status: str = "Новая", module: st
             InlineKeyboardButton("✅ Решено", callback_data=f"done_{report_id}")
         ])
     else:
-        # Стандартная логика
         if status == "Новая":
             rows.append([
                 InlineKeyboardButton("🛠 В работу", callback_data=f"take_{report_id}"),
@@ -241,13 +233,7 @@ async def set_commands(application: Application):
         BotCommand("my_reports", "Мои заявки"),
     ]
 
-    staff_commands = [
-        BotCommand("start", "Главное сообщение"),
-        BotCommand("faq", "Частые вопросы"),
-        BotCommand("support", "Связаться с поддержкой"),
-        BotCommand("report", "Отправить ошибку"),
-        BotCommand("my_role", "Показать мою роль"),
-        BotCommand("my_reports", "Мои заявки"),
+    staff_commands = student_commands + [
         BotCommand("staff_menu", "Открыть меню сотрудника"),
         BotCommand("new_reports", "Новые заявки"),
         BotCommand("list_reports", "Последние заявки"),
@@ -263,26 +249,17 @@ async def set_commands(application: Application):
         BotCommand("export_excel", "Выгрузить Excel"),
     ]
 
-    await application.bot.set_my_commands(
-        student_commands,
-        scope=BotCommandScopeDefault()
-    )
+    await application.bot.set_my_commands(student_commands, scope=BotCommandScopeDefault())
 
     for dev_id in DEVELOPER_IDS:
         try:
-            await application.bot.set_my_commands(
-                staff_commands,
-                scope=BotCommandScopeChat(chat_id=dev_id)
-            )
+            await application.bot.set_my_commands(staff_commands, scope=BotCommandScopeChat(chat_id=dev_id))
         except Exception as e:
             logger.error(f"Не удалось установить команды для разработчика {dev_id}: {e}")
 
     for admin_id in ADMIN_IDS:
         try:
-            await application.bot.set_my_commands(
-                admin_commands,
-                scope=BotCommandScopeChat(chat_id=admin_id)
-            )
+            await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
         except Exception as e:
             logger.error(f"Не удалось установить команды для админа {admin_id}: {e}")
 
@@ -532,7 +509,6 @@ def admin_redirect() -> RedirectResponse:
     return RedirectResponse(url="/admin/login", status_code=303)
 
 
-# Асинхронная версия для использования внутри бота и FastAPI роутов
 async def get_dashboard_counts_async() -> dict:
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
@@ -547,7 +523,6 @@ async def get_dashboard_counts_async() -> dict:
             return await cursor.fetchone()
 
 
-# Асинхронная версия получения списка заявок
 async def get_reports_async(
     status_filter: str | None = None,
     module_filter: str | None = None,
@@ -555,10 +530,6 @@ async def get_reports_async(
     page: int = 1,
     per_page: int = 20,
 ) -> tuple[list[dict], int]:
-    """
-    Асинхронное получение списка заявок с пагинацией и фильтрами.
-    Возвращает кортеж: (список_заявок, общее_количество_строк_по_фильтру)
-    """
     conditions = []
     params = []
 
@@ -588,16 +559,12 @@ async def get_reports_async(
 
     where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     
-    # 1. Сначала считаем общее количество подходящих записей (для пагинации)
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f"SELECT COUNT(*) FROM reports {where_sql}", params)
             total_records = (await cursor.fetchone())["count"]
 
-    # 2. Вычисляем смещение (OFFSET) для текущей страницы
     offset = (page - 1) * per_page
-    
-    # Добавляем LIMIT и OFFSET в параметры для основного запроса
     main_params = params.copy()
     main_params.extend([per_page, offset])
 
@@ -619,7 +586,6 @@ async def get_reports_async(
     return reports, total_records
 
 
-# Синхронная версия для обратной совместимости в синхронных роутах FastAPI / openpyxl
 def get_reports(
     status_filter: str | None = None,
     module_filter: str | None = None,
@@ -686,7 +652,6 @@ async def get_report_async(report_id: int) -> dict | None:
             return await cursor.fetchone()
 
 
-# Синхронный метод для FastAPI-шаблонов
 def get_report(report_id: int) -> dict | None:
     with get_sync_conn() as conn:
         with conn.cursor() as cursor:
@@ -754,19 +719,13 @@ async def notify_student_status(report: dict, report_id: int, new_status: str):
     except Exception as e:
         logger.error(f"Не удалось уведомить студента: {e}")
 
+
 async def apply_report_status_change(report_id: int, new_status: str, actor, silent: bool = False) -> bool:
-    """
-    Глобальная функция изменения статуса заявки.
-    Обновляет БД, синхронизирует кнопки у админов в TG, логирует действие и уведомляет студента.
-    """
     report = await update_report_status_in_db_async(report_id, new_status)
     if not report:
         return False
 
-    # Синхронизируем inline-кнопки во всех чатах админов
     await sync_report_keyboards(telegram_app, report_id, new_status)
-    
-    # Логируем действие в чаты суперадминов и админов
     await notify_admins_status_change(
         context=telegram_app,
         report_id=report_id,
@@ -774,12 +733,11 @@ async def apply_report_status_change(report_id: int, new_status: str, actor, sil
         new_status=new_status,
         actor=actor,
     )
-    
-    # Отправляем уведомление студенту в ЛС (если не включен тихий режим)
     if not silent:
         await notify_student_status(report, report_id, new_status)
         
     return True
+
 
 async def send_reply_to_student_from_admin(report_id: int, message_text: str, actor) -> bool:
     report = await get_report_async(report_id)
@@ -822,16 +780,7 @@ def build_reports_excel(rows: list[dict]) -> BytesIO:
     ws.title = "Заявки"
 
     ws.append([
-        "ID",
-        "Дата",
-        "Telegram ID",
-        "Username",
-        "ФИО",
-        "Группа",
-        "Модуль",
-        "Описание",
-        "Статус",
-        "Есть скриншот",
+        "ID", "Дата", "Telegram ID", "Username", "ФИО", "Группа", "Модуль", "Описание", "Статус", "Есть скриншот",
     ])
 
     for row in rows:
@@ -983,7 +932,6 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["group"] = update.message.text.strip()
 
-    # Добавляем в клавиатуру новый шаг: Приемная комиссия
     keyboard = [
         ["Регистрация на дисциплины", "Общежитие"],
         ["Платежи", "Приемная комиссия"],
@@ -1002,9 +950,37 @@ async def get_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["module"] = update.message.text.strip()
+    chosen_module = update.message.text.strip()
+    context.user_data["module"] = chosen_module
+    
+    if chosen_module == "Приемная комиссия":
+        keyboard = [
+            ["🎓 Бакалавриат"],
+            ["📚 Магистратура"],
+            ["🔬 Докторантура (PhD)"]
+        ]
+        await update.message.reply_text(
+            "Пожалуйста, выберите ваш академический статус для поступления в Astana IT University:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard,
+                resize_keyboard=True,
+                one_time_keyboard=True
+            )
+        )
+        return ACADEMIC_STATUS
+    else:
+        await update.message.reply_text(
+            "Опишите проблему:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return DESCRIPTION
+
+
+async def get_academic_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status_text = update.message.text.strip()
+    context.user_data["academic_status"] = status_text
     await update.message.reply_text(
-        "Опишите проблему:",
+        "Опишите ваш вопрос к приемной комиссии:",
         reply_markup=ReplyKeyboardRemove()
     )
     return DESCRIPTION
@@ -1014,7 +990,7 @@ async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["description"] = update.message.text.strip()
 
     await update.message.reply_text(
-        "Теперь отправьте скриншот или нажмите кнопку ниже.",
+        "Now send a screenshot or press the button below.",
         reply_markup=get_skip_screenshot_keyboard()
     )
     return SCREENSHOT
@@ -1037,6 +1013,10 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
     created_at = datetime.now()
+    
+    final_description = context.user_data["description"]
+    if context.user_data.get("academic_status"):
+        final_description = f"[{context.user_data['academic_status']}] {final_description}"
 
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
@@ -1055,7 +1035,7 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     context.user_data["name"],
                     context.user_data["group"],
                     context.user_data["module"],
-                    context.user_data["description"],
+                    final_description,
                     screenshot_file_id,
                     "Новая",
                 )
@@ -1069,13 +1049,12 @@ async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         name=context.user_data["name"],
         group_name=context.user_data["group"],
         module=context.user_data["module"],
-        description=context.user_data["description"],
+        description=final_description,
         status="Новая",
         user_id=user.id if user else None,
         username=user.username if user else None,
     )
 
-    # Передаем модуль в клавиатуру
     keyboard = build_inline_keyboard(report_id, "Новая", context.user_data["module"])
     recipients = ADMIN_IDS.union(DEVELOPER_IDS)
 
@@ -1471,7 +1450,6 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Только админ может выгружать Excel.")
         return
 
-    # Запускаем в синхронном режиме, т.к. это тяжелая выгрузка
     reports_list = get_reports(limit=None)
     file_stream = build_reports_excel(reports_list)
 
@@ -1483,7 +1461,7 @@ async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# INLINE BUTTONS
+# INLINE BUTTONS (TEMPLATE WORK)
 # =========================
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1500,13 +1478,10 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         report_id = int(data.split("_")[1])
         await save_report_message(report_id, query.message.chat_id, query.message.message_id)
 
-        # 1. Обновляем статус в БД на "Решено"
         async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT id, user_id, module, name, group_name, status
-                    FROM reports
-                    WHERE id = %s
+                    SELECT id, user_id, module, description FROM reports WHERE id = %s
                 """, (report_id,))
                 row = await cursor.fetchone()
 
@@ -1514,48 +1489,62 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.message.reply_text("Заявка не найдена.")
                     return
 
-                await cursor.execute(
-                    "UPDATE reports SET status = %s WHERE id = %s",
-                    ("Решено", report_id)
-                )
+                await cursor.execute("UPDATE reports SET status = 'Решено' WHERE id = %s", (report_id,))
             await conn.commit()
 
-        # 2. Отправляем студенту шаблонный ответ
-        if row["user_id"]:
-            # Шаблон ответа (в будущем поменяем текст здесь)
+        desc = row["description"] or ""
+        
+        # Автоматическое распределение по маркерам академического статуса
+        if "Магистратура" in desc:
+            subject = "📚 Информация для поступающих в Магистратуру"
+            url = "https://astanait.edu.kz/ru/master"
             template_text = (
+                "Здравствуйте! Актуальную информацию по вопросам поступления в **Магистратуру** Astana IT University "
+                "(сроки подачи документов, вступительные экзамены, перечень специальностей и требования) вы можете изучить по ссылке:\n\n"
+                f"👉 {url}\n\n"
+                "Все подробности доступны на официальном портале."
+            )
+        elif "Докторантура" in desc or "PhD" in desc:
+            subject = "🔬 Информация для поступающих в Докторантуру (PhD)"
+            url = "https://astanait.edu.kz/ru/phd"
+            template_text = (
+                "Здравствуйте! Подробные правила приема, требования к исследовательским предложениям (research proposal), "
+                "список необходимых документов и контакты координаторов программ **Докторантуры (PhD)** доступны на нашем сайте:\n\n"
+                f"👉 {url}\n\n"
+                "Перейдите по ссылке для ознакомления со всеми условиями приемной кампании."
+            )
+        else:
+            subject = "🎓 Информация для поступающих на Бакалавриат"
+            url = "https://astanait.edu.kz/ru/bachelor"
+            template_text = (
+                "Здравствуйте! Всю необходимую информацию о правилах приема, перечне документов, "
+                "образовательных программах и грантах для поступающих на **Бакалавриат** вы найдете на официальном сайте AITU:\n\n"
+                f"👉 {url}\n\n"
+                "Пожалуйста, ознакомьтесь с информацией на странице."
+            )
+
+        if row["user_id"]:
+            full_student_message = (
                 f"✉️ Ответ по вашей заявке #{report_id} (Приемная комиссия)\n\n"
-                "Здравствуйте! Всю необходимую информацию вы найдете на нашем официальном сайте:\n"
-                "👉 https://example.com/admission\n\n"
+                f"{template_text}\n\n"
                 "Если у вас остались специфические вопросы, вы можете ответить на это сообщение."
             )
             try:
-                sent = await context.bot.send_message(
-                    chat_id=row["user_id"],
-                    text=template_text,
-                )
+                sent = await context.bot.send_message(chat_id=row["user_id"], text=full_student_message)
                 await save_student_report_message(report_id, row["user_id"], sent.message_id)
             except Exception as e:
                 logger.error(f"Не удалось отправить шаблонный ответ студенту: {e}")
 
-        # 3. Обновляем клавиатуры у админов
         await query.edit_message_reply_markup(
             reply_markup=build_inline_keyboard(report_id, "Решено", row["module"])
         )
         await sync_report_keyboards(
-            context,
-            report_id,
-            "Решено",
-            skip_chat_id=query.message.chat_id,
-            skip_message_id=query.message.message_id,
+            context, report_id, "Решено",
+            skip_chat_id=query.message.chat_id, skip_message_id=query.message.message_id,
         )
-        await query.message.reply_text(f"✅ Для заявки #{report_id} отправлен шаблонный ответ.")
+        await query.message.reply_text(f"✅ Для заявки #{report_id} отправлен шаблон: {subject}")
         await notify_admins_status_change(
-            context=context,
-            report_id=report_id,
-            module=row["module"],
-            new_status="Решено",
-            actor=user,
+            context=context, report_id=report_id, module=row["module"], new_status="Resheno", actor=user
         )
 
     elif data.startswith("take_"):
@@ -1565,9 +1554,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT id, user_id, module, name, group_name, status
-                    FROM reports
-                    WHERE id = %s
+                    SELECT id, user_id, module, name, group_name, status FROM reports WHERE id = %s
                 """, (report_id,))
                 row = await cursor.fetchone()
 
@@ -1575,30 +1562,16 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.message.reply_text("Заявка не найдена.")
                     return
 
-                await cursor.execute(
-                    "UPDATE reports SET status = %s WHERE id = %s",
-                    ("В работе", report_id)
-                )
+                await cursor.execute("UPDATE reports SET status = 'В работе' WHERE id = %s", (report_id,))
             await conn.commit()
 
-        await query.edit_message_reply_markup(
-            reply_markup=build_inline_keyboard(report_id, "В работе", row["module"])
-        )
+        await query.edit_message_reply_markup(reply_markup=build_inline_keyboard(report_id, "В работе", row["module"]))
         await sync_report_keyboards(
-            context,
-            report_id,
-            "В работе",
-            skip_chat_id=query.message.chat_id,
-            skip_message_id=query.message.message_id,
+            context, report_id, "В работе",
+            skip_chat_id=query.message.chat_id, skip_message_id=query.message.message_id,
         )
         await query.message.reply_text(f"🛠 Заявка #{report_id} взята в работу")
-        await notify_admins_status_change(
-            context=context,
-            report_id=report_id,
-            module=row["module"],
-            new_status="В работе",
-            actor=user,
-        )
+        await notify_admins_status_change(context=context, report_id=report_id, module=row["module"], new_status="В работе", actor=user)
         await notify_student_status(row, report_id, "В работе")
 
     elif data.startswith("done_"):
@@ -1608,9 +1581,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT id, user_id, module, name, group_name, status
-                    FROM reports
-                    WHERE id = %s
+                    SELECT id, user_id, module, name, group_name, status FROM reports WHERE id = %s
                 """, (report_id,))
                 row = await cursor.fetchone()
 
@@ -1618,38 +1589,22 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.message.reply_text("Заявка не найдена.")
                     return
 
-                await cursor.execute(
-                    "UPDATE reports SET status = %s WHERE id = %s",
-                    ("Решено", report_id)
-                )
+                await cursor.execute("UPDATE reports SET status = 'Решено' WHERE id = %s", (report_id,))
             await conn.commit()
 
-        await query.edit_message_reply_markup(
-            reply_markup=build_inline_keyboard(report_id, "Решено", row["module"])
-        )
+        await query.edit_message_reply_markup(reply_markup=build_inline_keyboard(report_id, "Решено", row["module"]))
         await sync_report_keyboards(
-            context,
-            report_id,
-            "Решено",
-            skip_chat_id=query.message.chat_id,
-            skip_message_id=query.message.message_id,
+            context, report_id, "Решено",
+            skip_chat_id=query.message.chat_id, skip_message_id=query.message.message_id,
         )
         await query.message.reply_text(f"✅ Заявка #{report_id} решена")
-        await notify_admins_status_change(
-            context=context,
-            report_id=report_id,
-            module=row["module"],
-            new_status="Решено",
-            actor=user,
-        )
+        await notify_admins_status_change(context=context, report_id=report_id, module=row["module"], new_status="Решено", actor=user)
         await notify_student_status(row, report_id, "Решено")
 
     elif data.startswith("reply_"):
         report_id = int(data.split("_")[1])
         context.user_data["reply_report_id"] = report_id
-        await query.message.reply_text(
-            f"Введите сообщение для студента по заявке #{report_id}:"
-        )
+        await query.message.reply_text(f"Введите сообщение для студента по заявке #{report_id}:")
 
 
 # =========================
@@ -1657,7 +1612,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-
     if not user or not is_staff(user.id):
         return
 
@@ -1668,11 +1622,7 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.message and update.message.text and not update.message.text.startswith("/"):
         async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute("""
-                    SELECT user_id
-                    FROM reports
-                    WHERE id = %s
-                """, (report_id,))
+                await cursor.execute("SELECT user_id FROM reports WHERE id = %s", (report_id,))
                 row = await cursor.fetchone()
 
         if not row or not row["user_id"]:
@@ -1687,7 +1637,6 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     "Ответьте на это сообщение, чтобы продолжить диалог."
                 )
             )
-
             await save_student_report_message(report_id, row["user_id"], sent.message_id)
 
             username_str = f"@{user.username}" if user.username else "-"
@@ -1707,7 +1656,6 @@ async def staff_reply_router(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     logger.error(f"Ошибка отправки лога: {e}")
 
             await update.message.reply_text("Сообщение отправлено студенту ✅")
-
         except Exception as e:
             logger.error(f"Ошибка отправки студенту: {e}")
             await update.message.reply_text("Не удалось отправить ❌")
@@ -1719,26 +1667,12 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     message = update.message
 
-    if not user or not message or not message.text:
-        return
-
-    if is_staff(user.id):
-        return
-
-    if context.user_data.get("report_in_progress"):
+    if not user or not message or not message.text or is_staff(user.id) or context.user_data.get("report_in_progress"):
         return
 
     ignored_texts = {
-        "Пропустить",
-        "Новые заявки",
-        "Последние заявки",
-        "Поиск по ID",
-        "Фильтр по модулю",
-        "Изменить статус",
-        "Взять в работу",
-        "Отметить решённой",
-        "Выгрузить Excel",
-        "Скрыть меню",
+        "Пропустить", "Новые заявки", "Последние заявки", "Поиск по ID", "Фильтр по модулю",
+        "Изменить статус", "Взять в работу", "Отметить решённой", "Выгрузить Excel", "Скрыть меню",
     }
     if message.text.strip() in ignored_texts:
         return
@@ -1749,11 +1683,7 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     if report_id:
         async with await get_conn_async() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute("""
-                    SELECT id, module, name, group_name, status
-                    FROM reports
-                    WHERE id = %s
-                """, (report_id,))
+                await cursor.execute("SELECT id, module, name, group_name, status FROM reports WHERE id = %s", (report_id,))
                 report = await cursor.fetchone()
     else:
         report = await get_last_active_report_for_user(user.id)
@@ -1779,16 +1709,13 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     for admin_id in recipients:
         try:
             await context.bot.send_message(
-                chat_id=admin_id,
-                text=text,
+                chat_id=admin_id, text=text,
                 reply_markup=build_inline_keyboard(report_id, report["status"], report["module"])
             )
         except Exception as e:
             logger.error(f"Ошибка пересылки: {e}")
 
-    await message.reply_text(
-        f"Ваше сообщение по заявке #{report_id} передано сотрудникам ✅"
-    )
+    await message.reply_text(f"Ваше сообщение по заявке #{report_id} передано сотрудникам ✅")
 
 
 # =========================
@@ -1803,46 +1730,31 @@ async def staff_button_router(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if text == "Новые заявки":
         await new_reports(update, context)
-        return
-
-    if text == "Последние заявки":
+    elif text == "Последние заявки":
         await list_reports(update, context)
-        return
-
-    if text == "Поиск по ID":
+    elif text == "Поиск по ID":
         await update.message.reply_text("Введите номер заявки:")
         return STAFF_REPORT_ID
-
-    if text == "Фильтр по модулю":
+    elif text == "Фильтр по модулю":
         modules_text = "\n".join(MODULES)
-        await update.message.reply_text(
-            "Введите название модуля точно так же, как ниже:\n\n"
-            f"{modules_text}"
-        )
+        await update.message.reply_text(f"Введите название модуля точно так же, как ниже:\n\n{modules_text}")
         return STAFF_FILTER_MODULE
-
-    if text == "Изменить статус":
+    elif text == "Изменить статус":
         await update.message.reply_text("Введите ID заявки:")
         return STAFF_SET_STATUS_ID
-
-    if text == "Взять в работу":
+    elif text == "Взять в работу":
         await update.message.reply_text("Введите ID заявки:")
         return STAFF_TAKE_REPORT_ID
-
-    if text == "Отметить решённой":
+    elif text == "Отметить решённой":
         await update.message.reply_text("Введите ID заявки:")
         return STAFF_RESOLVE_REPORT_ID
-
-    if text == "Выгрузить Excel":
+    elif text == "Выгрузить Excel":
         if is_admin(user.id):
             await export_excel(update, context)
         else:
             await update.message.reply_text("Только админ может выгружать Excel.")
-        return
-
-    if text == "Скрыть меню":
+    elif text == "Скрыть меню":
         await hide_menu(update, context)
-        return
 
 
 async def staff_get_report_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1862,11 +1774,7 @@ async def staff_get_filter_module(update: Update, context: ContextTypes.DEFAULT_
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
-                SELECT id, created_at, name, group_name, status
-                FROM reports
-                WHERE module = %s
-                ORDER BY id DESC
-                LIMIT 20
+                SELECT id, created_at, name, group_name, status FROM reports WHERE module = %s ORDER BY id DESC LIMIT 20
             """, (module_name,))
             rows = await cursor.fetchall()
 
@@ -1876,11 +1784,7 @@ async def staff_get_filter_module(update: Update, context: ContextTypes.DEFAULT_
 
     lines = [f"Заявки по модулю: {module_name}\n"]
     for row in rows:
-        lines.append(
-            f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"{row['name']} | {row['group_name']}\n"
-            f"Статус: {row['status']}\n"
-        )
+        lines.append(f"#{row['id']} | {row['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n{row['name']} | {row['group_name']}\nСтатус: {row['status']}\n")
 
     await update.message.reply_text("\n".join(lines))
     return ConversationHandler.END
@@ -1916,24 +1820,13 @@ async def staff_get_status_value(update: Update, context: ContextTypes.DEFAULT_T
                 context.user_data.pop("status_report_id", None)
                 return ConversationHandler.END
 
-            await cursor.execute(
-                "UPDATE reports SET status = %s WHERE id = %s",
-                (new_status, report_id)
-            )
+            await cursor.execute("UPDATE reports SET status = %s WHERE id = %s", (new_status, report_id))
         await conn.commit()
 
     context.user_data.pop("status_report_id", None)
-    await update.message.reply_text(
-        f"Статус заявки #{report_id} изменён на: {new_status}"
-    )
+    await update.message.reply_text(f"Статус заявки #{report_id} изменён на: {new_status}")
     await sync_report_keyboards(context, report_id, new_status)
-    await notify_admins_status_change(
-        context=context,
-        report_id=report_id,
-        module=report["module"],
-        new_status=new_status,
-        actor=update.effective_user,
-    )
+    await notify_admins_status_change(context=context, report_id=report_id, module=report["module"], new_status=new_status, actor=update.effective_user)
     return ConversationHandler.END
 
 
@@ -1962,7 +1855,7 @@ async def staff_resolve_report_by_button(update: Update, context: ContextTypes.D
 
 
 # =========================
-# TELEGRAM APP
+# TELEGRAM APP SETUP
 # =========================
 telegram_app = Application.builder().token(TOKEN).build()
 
@@ -1972,6 +1865,7 @@ report_conv_handler = ConversationHandler(
         NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
         GROUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_group)],
         MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_module)],
+        ACADEMIC_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_academic_status)],
         DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_description)],
         SCREENSHOT: [
             MessageHandler(filters.PHOTO, get_screenshot),
@@ -2002,7 +1896,6 @@ staff_conv_handler = ConversationHandler(
 
 telegram_app.add_error_handler(error_handler)
 
-# Сначала добавляем команды
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("faq", faq))
 telegram_app.add_handler(CommandHandler("support", support))
@@ -2019,31 +1912,22 @@ telegram_app.add_handler(CommandHandler("resolve_report", resolve_report))
 telegram_app.add_handler(CommandHandler("export_excel", export_excel))
 telegram_app.add_handler(CommandHandler("cancel", cancel))
 
-# Сначала регистрируем диалоги (ConversationHandlers)
 telegram_app.add_handler(report_conv_handler)
 telegram_app.add_handler(staff_conv_handler)
-
-# Обработка inline-кнопок
 telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
 
-# Текстовые кнопки меню сотрудников
 telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Последние заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Выгрузить Excel$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Скрыть меню$"), staff_button_router))
 
-# Глобальные перехватчики переписки (reply-сообщений) убираем в отдельные группы с более низким приоритетом
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
-telegram_app.add_handler(
-    MessageHandler(filters.TEXT & ~filters.COMMAND, student_reply_router),
-    group=20
-)
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, student_reply_router), group=20)
 
 
 # =========================
-# FASTAPI WEBHOOK
+# FASTAPI WEB PANEL ROUTERS
 # =========================
-
 @app.post("/admin/reports/bulk-action")
 async def admin_reports_bulk_action(
     request: Request,
@@ -2055,14 +1939,14 @@ async def admin_reports_bulk_action(
         return admin_redirect()
 
     if not report_ids:
-        return RedirectResponse(url="/admin/reports?message=no_selected", status_code=303)
+        return RedirectResponse(url="/admin?message=no_selected", status_code=303)
 
     target_status = "В работе" if action == "take" else "Решено"
-
     for r_id in report_ids:
         await apply_report_status_change(r_id, target_status, WebActor(admin_username))
 
-    return RedirectResponse(url=f"/admin/reports?message=bulk_success", status_code=303)
+    return RedirectResponse(url="/admin?message=bulk_success", status_code=303)
+
 
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_page(request: Request):
@@ -2070,8 +1954,7 @@ async def admin_login_page(request: Request):
         return RedirectResponse(url="/admin", status_code=303)
 
     return templates.TemplateResponse(
-        request,
-        "login.html",
+        request, "login.html",
         {
             "request": request,
             "error": request.query_params.get("error"),
@@ -2082,25 +1965,15 @@ async def admin_login_page(request: Request):
 
 
 @app.post("/admin/login")
-async def admin_login(
-    username: str = Form(...),
-    password: str = Form(...),
-):
+async def admin_login(username: str = Form(...), password: str = Form(...)):
     if not ADMIN_PANEL_PASSWORD:
         return RedirectResponse(url="/admin/login?error=config", status_code=303)
 
-    if (
-        hmac.compare_digest(username, ADMIN_PANEL_USERNAME)
-        and hmac.compare_digest(password, ADMIN_PANEL_PASSWORD)
-    ):
+    if hmac.compare_digest(username, ADMIN_PANEL_USERNAME) and hmac.compare_digest(password, ADMIN_PANEL_PASSWORD):
         response = RedirectResponse(url="/admin", status_code=303)
         response.set_cookie(
-            key=ADMIN_SESSION_COOKIE,
-            value=create_admin_session(username),
-            max_age=ADMIN_SESSION_MAX_AGE,
-            httponly=True,
-            secure=ADMIN_COOKIE_SECURE,
-            samesite="lax",
+            key=ADMIN_SESSION_COOKIE, value=create_admin_session(username),
+            max_age=ADMIN_SESSION_MAX_AGE, httponly=True, secure=ADMIN_COOKIE_SECURE, samesite="lax",
         )
         return response
 
@@ -2115,14 +1988,8 @@ async def admin_logout():
 
 
 @app.get("/admin", response_class=HTMLResponse)
-
-@app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(
-    request: Request,
-    status: str | None = None,
-    module: str | None = None,
-    q: str | None = None,
-    page: int = 1,
+    request: Request, status: str | None = None, module: str | None = None, q: str | None = None, page: int = 1,
 ):
     admin_username = get_admin_username(request)
     if not admin_username:
@@ -2135,68 +2002,42 @@ async def admin_dashboard(
     if page < 1:
         page = 1
 
-    # Задаем лимит записей на одну страницу
     per_page = 20
-
-    # Общая статистика для верхних карточек
     counts = await get_dashboard_counts_async()
     
-    # Извлекаем данные и общее число отфильтрованных записей
     reports, total_filtered = await get_reports_async(
-        status_filter=status,
-        module_filter=module,
-        search=q,
-        page=page,
-        per_page=per_page
+        status_filter=status, module_filter=module, search=q, page=page, per_page=per_page
     )
-
-    # Рассчитываем общее количество страниц
     total_pages = math.ceil(total_filtered / per_page) if total_filtered > 0 else 1
 
     return templates.TemplateResponse(
-        request,
-        "dashboard.html",
+        request, "dashboard.html",
         {
-            "request": request,
-            "admin_username": admin_username,
-            "counts": counts,
-            "reports": reports,
-            "statuses": STATUSES,
-            "modules": MODULES,
-            "selected_status": status or "",
-            "selected_module": module or "",
-            "query": q or "",
-            "active_page": "dashboard",
-            "message": request.query_params.get("message"),
-            "current_page": page,
-            "total_pages": total_pages,
-            "total_filtered": total_filtered
+            "request": request, "admin_username": admin_username, "counts": counts, "reports": reports,
+            "statuses": STATUSES, "modules": MODULES, "selected_status": status or "", "selected_module": module or "",
+            "query": q or "", "active_page": "dashboard", "message": request.query_params.get("message"),
+            "current_page": page, "total_pages": total_pages, "total_filtered": total_filtered
         },
     )
 
 
 @app.get("/admin/reports")
 async def admin_reports(request: Request):
-    # Автоматически перенаправляем на главную панель, так как мы объединили интерфейс
     return RedirectResponse(url="/admin", status_code=303)
 
-import asyncio
+
 @app.get("/admin/reports/export.xlsx")
 async def admin_export_reports(request: Request):
     if not get_admin_username(request):
         return admin_redirect()
 
-    # Запрашиваем данные асинхронно из БД
-    reports_list = await get_reports_async(limit=None)
-    
-    # Выносим синхронное создание Excel-файла в фоновый поток, чтобы не блокировать асинхронный цикл событий
+    reports_list = get_reports(limit=None)
     loop = asyncio.get_running_loop()
     file_stream = await loop.run_in_executor(None, build_reports_excel, reports_list)
     
     filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return StreamingResponse(
-        file_stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        file_stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -2212,17 +2053,11 @@ async def admin_report_detail(request: Request, report_id: int):
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
     return templates.TemplateResponse(
-        request,
-        "report_detail.html",
+        request, "report_detail.html",
         {
-            "request": request,
-            "admin_username": admin_username,
-            "report": report,
-            "statuses": STATUSES,
-            "modules": MODULES,
-            "active_page": "reports",
-            "message": request.query_params.get("message"),
-            "error": request.query_params.get("error"),
+            "request": request, "admin_username": admin_username, "report": report,
+            "statuses": STATUSES, "modules": MODULES, "active_page": "reports",
+            "message": request.query_params.get("message"), "error": request.query_params.get("error"),
         },
     )
 
@@ -2247,12 +2082,7 @@ async def admin_report_screenshot(request: Request, report_id: int):
 
 
 @app.post("/admin/reports/{report_id}/status")
-async def admin_report_status(
-    request: Request,
-    report_id: int,
-    status: str = Form(...),
-    next_url: str = Form(default=""),
-):
+async def admin_report_status(request: Request, report_id: int, status: str = Form(...), next_url: str = Form(default="")):
     admin_username = get_admin_username(request)
     if not admin_username:
         return admin_redirect()
@@ -2268,11 +2098,7 @@ async def admin_report_status(
 
 
 @app.post("/admin/reports/{report_id}/reply")
-async def admin_report_reply(
-    request: Request,
-    report_id: int,
-    message: str = Form(...),
-):
+async def admin_report_reply(request: Request, report_id: int, message: str = Form(...)):
     admin_username = get_admin_username(request)
     if not admin_username:
         return admin_redirect()
@@ -2281,11 +2107,7 @@ async def admin_report_reply(
     if not message_text:
         return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply_empty", status_code=303)
 
-    success = await send_reply_to_student_from_admin(
-        report_id=report_id,
-        message_text=message_text,
-        actor=WebActor(admin_username),
-    )
+    success = await send_reply_to_student_from_admin(report_id=report_id, message_text=message_text, actor=WebActor(admin_username))
     if not success:
         return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply", status_code=303)
 
@@ -2298,7 +2120,6 @@ async def admin_take_report(request: Request, report_id: int):
     if not admin_username:
         return admin_redirect()
 
-    # Переводим статус в "В работе" через безопасную функцию
     await apply_report_status_change(report_id, "В работе", WebActor(admin_username))
     return RedirectResponse(url="/admin", status_code=303)
 
@@ -2309,11 +2130,13 @@ async def admin_resolve_report(request: Request, report_id: int):
     if not admin_username:
         return admin_redirect()
 
-    # Переводим статус в "Решено" через безопасную функцию
     await apply_report_status_change(report_id, "Решено", WebActor(admin_username))
     return RedirectResponse(url="/admin", status_code=303)
 
 
+# =========================
+# SYSTEM STARTUP & LIFECYCLE
+# =========================
 @app.on_event("startup")
 async def on_startup():
     await init_db()
