@@ -2137,28 +2137,24 @@ async def admin_resolve_report(request: Request, report_id: int):
 # =========================
 # SYSTEM STARTUP & LIFECYCLE
 # =========================
+# Замените блок lifecycle в самом конце bot.py:
+
+polling_task = None
+
 @app.on_event("startup")
 async def on_startup():
+    global polling_task
     await init_db()
     await telegram_app.initialize()
     await telegram_app.start()
-    await set_commands(telegram_app)
+    # Запускаем polling в фоновом режиме (не зависит от входящего порта 443)
+    await telegram_app.updater.start_polling(drop_pending_updates=True)
+    logger.info("Бот успешно запущен в режиме Polling!")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    if telegram_app.updater.running:
+        await telegram_app.updater.stop()
     await telegram_app.stop()
     await telegram_app.shutdown()
-
-
-@app.get("/")
-async def healthcheck():
-    return {"status": "ok"}
-
-
-@app.post(f"/{TOKEN}")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return {"ok": True}
