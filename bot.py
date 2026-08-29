@@ -221,7 +221,10 @@ async def set_commands(application: Application):
         BotCommand("resolve_report", "Отметить заявку решённой"),
         BotCommand("cancel", "Отменить действие"),
     ]
-    admin_commands = staff_commands + [BotCommand("export_excel", "Выгрузить Excel")]
+   admin_commands = staff_commands + [
+        BotCommand("export_excel", "Выгрузить Excel"),
+        BotCommand("restart_bot", "🔄 Перезапустить бота"),
+    ]
 
     await application.bot.set_my_commands(student_commands, scope=BotCommandScopeDefault())
     for dev_id in DEVELOPER_IDS:
@@ -652,7 +655,8 @@ async def restart_bot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("🔄 Перезапускаю службу бота...")
     try:
-        subprocess.Popen(["sudo", "systemctl", "restart", "mydu-bot"])
+        # Указываем полные абсолютные пути к утилитам
+        subprocess.Popen(["/usr/bin/sudo", "/usr/bin/systemctl", "restart", "mydu-bot"])
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка перезапуска: {e}")
 
