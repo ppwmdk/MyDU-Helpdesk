@@ -919,7 +919,10 @@ async def my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def report_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["report_in_progress"] = True
-    await update.message.reply_text("Введите ФИО:")
+    await update.message.reply_text(
+        "Введите ФИО:",
+        reply_markup=ReplyKeyboardRemove()
+    )
     return NAME
 
 
@@ -1894,8 +1897,19 @@ staff_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel)],
 )
 
+# =========================
+# TELEGRAM APP HANDLERS REGISTRATION
+# =========================
 telegram_app.add_error_handler(error_handler)
 
+# 1. ПЕРВЫМИ регистрируем диалоги (ConversationHandler) с наивысшим приоритетом
+telegram_app.add_handler(report_conv_handler)
+telegram_app.add_handler(staff_conv_handler)
+
+# 2. Inline-кнопки
+telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
+
+# 3. Базовые команды
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("faq", faq))
 telegram_app.add_handler(CommandHandler("support", support))
@@ -1912,18 +1926,15 @@ telegram_app.add_handler(CommandHandler("resolve_report", resolve_report))
 telegram_app.add_handler(CommandHandler("export_excel", export_excel))
 telegram_app.add_handler(CommandHandler("cancel", cancel))
 
-telegram_app.add_handler(report_conv_handler)
-telegram_app.add_handler(staff_conv_handler)
-telegram_app.add_handler(CallbackQueryHandler(handle_buttons))
-
+# 4. Текстовые кнопки меню сотрудников
 telegram_app.add_handler(MessageHandler(filters.Regex("^Новые заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Последние заявки$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Выгрузить Excel$"), staff_button_router))
 telegram_app.add_handler(MessageHandler(filters.Regex("^Скрыть меню$"), staff_button_router))
 
+# 5. Глобальные перехватчики сообщений (ТОЛЬКО в отдельных низкоприоритетных группах)
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_reply_router), group=10)
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, student_reply_router), group=20)
-
 
 # =========================
 # FASTAPI WEB PANEL ROUTERS
