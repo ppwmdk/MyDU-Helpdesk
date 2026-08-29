@@ -221,7 +221,7 @@ async def set_commands(application: Application):
         BotCommand("resolve_report", "Отметить заявку решённой"),
         BotCommand("cancel", "Отменить действие"),
     ]
-   admin_commands = staff_commands + [
+    admin_commands = staff_commands + [
         BotCommand("export_excel", "Выгрузить Excel"),
         BotCommand("restart_bot", "🔄 Перезапустить бота"),
     ]
