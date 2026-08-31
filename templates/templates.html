@@ -3,79 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Шаблоны ответов — Astana IT Helpdesk</title>
+    <title>{% block title %}Astana IT University — Helpdesk{% endblock %}</title>
+    <!-- Bootstrap 5 & Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
-        body { background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .sidebar { background-color: #0f172a; min-height: 100vh; color: #fff; }
-        .sidebar a { color: #94a3b8; text-decoration: none; display: block; padding: 10px 16px; border-radius: 8px; margin-bottom: 4px; }
-        .sidebar a:hover, .sidebar a.active { background-color: #1e293b; color: #fff; }
-        .card { border: none; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        :root {
+            --sidebar-bg: #0f172a;
+            --sidebar-hover: #1e293b;
+            --main-bg: #f8fafc;
+        }
+        body {
+            background-color: var(--main-bg);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .sidebar {
+            background-color: var(--sidebar-bg);
+            min-height: 100vh;
+            color: #94a3b8;
+        }
+        .sidebar .nav-link {
+            color: #94a3b8;
+            font-weight: 500;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+        }
+        .sidebar .nav-link:hover {
+            color: #ffffff;
+            background-color: var(--sidebar-hover);
+        }
+        .sidebar .nav-link.active {
+            color: #ffffff;
+            background-color: #1e293b;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .sidebar .nav-link i {
+            font-size: 1.1rem;
+            margin-right: 12px;
+        }
+        .brand-header {
+            padding: 24px 16px 20px 16px;
+            text-align: center;
+        }
+        .brand-title {
+            color: #ffffff;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+            font-size: 1.05rem;
+        }
+        .brand-subtitle {
+            color: #38bdf8;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            font-size: 0.75rem;
+        }
     </style>
 </head>
 <body>
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-2 d-none d-md-block sidebar p-3">
-            <div class="text-center py-3 mb-4 border-bottom border-secondary">
-                <h6 class="fw-bold mb-0 text-white">ASTANA IT</h6>
-                <small class="text-info fw-bold">HELP-DESK</small>
+<div class="container-fluid p-0">
+    <div class="row g-0">
+        <!-- Боковая панель -->
+        <div class="col-auto col-md-3 col-lg-2 sidebar d-flex flex-column justify-content-between p-3">
+            <div>
+                <!-- Логотип / Шапка -->
+                <div class="brand-header border-bottom border-secondary border-opacity-25 mb-4">
+                    <div class="brand-title">ASTANA IT</div>
+                    <div class="brand-subtitle">HELP-DESK</div>
+                </div>
+
+                <!-- Навигация -->
+                <ul class="nav nav-pills flex-column mb-auto">
+                    <li class="nav-item">
+                        <a href="/admin" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">
+                            <i class="bi bi-grid-fill"></i>
+                            <span>Панель управления</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admin/modules" class="nav-link {% if active_page == 'modules' %}active{% endif %}">
+                            <i class="bi bi-tags-fill"></i>
+                            <span>Модули</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admin/templates" class="nav-link {% if active_page == 'templates' %}active{% endif %}">
+                            <i class="bi bi-chat-left-quote-fill"></i>
+                            <span>Шаблоны ответов</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admin/smart-faq" class="nav-link {% if active_page == 'smart_faq' %}active{% endif %}">
+                            <i class="bi bi-lightning-charge-fill"></i>
+                            <span>Smart FAQ</span>
+                        </a>
+                    </li>
+                    <li class="nav-item mt-2">
+                        <a href="/admin/reports/export.xlsx" class="nav-link text-success">
+                            <i class="bi bi-file-earmark-excel-fill"></i>
+                            <span>Выгрузить Excel</span>
+                        </a>
+                    </li>
+                </ul>
             </div>
-            <a href="/admin"><i class="bi bi-grid-fill me-2"></i> Панель управления</a>
-            <a href="/admin"><i class="bi bi-card-list me-2"></i> Все заявки</a>
-            <a href="/admin/modules"><i class="bi bi-tags-fill me-2"></i> Модули</a>
-            <a href="/admin/templates" class="active"><i class="bi bi-chat-left-quote-fill me-2"></i> Шаблоны ответов</a>
-            <a href="/admin/smart-faq"><i class="bi bi-lightning-charge-fill me-2"></i> Smart FAQ</a>
-            <div class="mt-5 pt-5 text-center">
-                <div class="small text-muted mb-2">Админ: <strong>{{ admin_username }}</strong></div>
+
+            <!-- Блок пользователя и Выход -->
+            <div class="pt-4 border-top border-secondary border-opacity-25 text-center">
+                <div class="small text-muted mb-2">
+                    Вы вошли как:<br>
+                    <span class="text-white fw-semibold"><i class="bi bi-person-circle me-1"></i> {{ admin_username }}</span>
+                </div>
                 <form method="POST" action="/admin/logout">
-                    <button type="submit" class="btn btn-sm btn-danger w-100">Выйти</button>
+                    <button type="submit" class="btn btn-danger btn-sm w-100 fw-medium">
+                        <i class="bi bi-box-arrow-right me-1"></i> Выйти
+                    </button>
                 </form>
             </div>
         </div>
-        <div class="col-md-10 p-4">
-            <h3 class="fw-bold mb-4">Шаблоны быстрых ответов</h3>
-            <div class="row g-4">
-                <div class="col-lg-8">
-                    <div class="card p-4">
-                        <h5 class="fw-bold mb-3">Сохраненные шаблоны</h5>
-                        {% if templates %}
-                            {% for tpl in templates %}
-                            <div class="border rounded-3 p-3 mb-3 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                    <h6 class="fw-bold mb-0 text-primary">{{ tpl.title }}</h6>
-                                    <form method="POST" action="/admin/templates/{{ tpl.id }}/delete" onsubmit="return confirm('Удалить шаблон?');">
-                                        <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                                    </form>
-                                </div>
-                                <div class="small text-muted text-break">{{ tpl.text }}</div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <p class="text-muted">Шаблонов пока нет. Добавьте первый шаблон справа.</p>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="col-lg-4">
-                    <div class="card p-4">
-                        <h5 class="fw-bold mb-3">➕ Новый шаблон</h5>
-                        <form method="POST" action="/admin/templates/add">
-                            <div class="mb-3">
-                                <label class="form-label">Название шаблона:</label>
-                                <input type="text" name="title" class="form-control" placeholder="например: Оплата Kaspi" required>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Текст ответа студенту:</label>
-                                <textarea name="text" class="form-control" rows="5" placeholder="Здравствуйте! ..." required></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">Сохранить шаблон</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
+
+        <!-- Основной контент страницы -->
+        <div class="col min-vh-100 p-4">
+            {% block content %}{% endblock %}
         </div>
     </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
