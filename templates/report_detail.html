@@ -12,7 +12,7 @@
         .sidebar a { color: #94a3b8; text-decoration: none; display: block; padding: 10px 16px; border-radius: 8px; margin-bottom: 4px; }
         .sidebar a:hover, .sidebar a.active { background-color: #1e293b; color: #fff; }
         .card { border: none; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-        .chat-box { max-height: 420px; overflow-y: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+        .chat-box { height: 380px; overflow-y: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
         .msg-staff { background: #0284c7; color: #fff; border-radius: 12px 12px 0 12px; max-width: 80%; }
         .msg-student { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px 12px 12px 0; max-width: 80%; }
     </style>
@@ -20,7 +20,7 @@
 <body>
 <div class="container-fluid">
     <div class="row">
-        <!-- Боковое меню -->
+        <!-- Меню слева -->
         <div class="col-md-2 d-none d-md-block sidebar p-3">
             <div class="text-center py-3 mb-4 border-bottom border-secondary">
                 <h6 class="fw-bold mb-0 text-white">ASTANA IT</h6>
@@ -28,16 +28,19 @@
             </div>
             <a href="/admin"><i class="bi bi-grid-fill me-2"></i> Панель управления</a>
             <a href="/admin" class="active"><i class="bi bi-card-list me-2"></i> Все заявки</a>
+            <a href="/admin/modules"><i class="bi bi-tags-fill me-2"></i> Модули</a>
+            <a href="/admin/templates"><i class="bi bi-chat-left-quote-fill me-2"></i> Шаблоны ответов</a>
+            <a href="/admin/smart-faq"><i class="bi bi-lightning-charge-fill me-2"></i> Smart FAQ</a>
             
             <div class="mt-5 pt-5 text-center">
-                <div class="small text-muted mb-2">Вы вошли как: <strong>{{ admin_username }}</strong></div>
+                <div class="small text-muted mb-2">Админ: <strong>{{ admin_username }}</strong></div>
                 <form method="POST" action="/admin/logout">
                     <button type="submit" class="btn btn-sm btn-danger w-100">Выйти</button>
                 </form>
             </div>
         </div>
 
-        <!-- Основной контент -->
+        <!-- Контент -->
         <div class="col-md-10 p-4">
             <div class="mb-3">
                 <a href="/admin" class="text-decoration-none text-muted">
@@ -48,7 +51,7 @@
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
                     <h3 class="fw-bold mb-1">Детали заявки #{{ report.id }}</h3>
-                    <span class="text-muted">Дата создания: {{ report.created_at.strftime('%Y-%m-%d %H:%M:%S') if report.created_at and report.created_at.strftime else report.created_at }}</span>
+                    <span class="text-muted">Дата: {{ report.created_at.strftime('%Y-%m-%d %H:%M:%S') if report.created_at and report.created_at.strftime else report.created_at }}</span>
                 </div>
             </div>
 
@@ -56,12 +59,9 @@
             <div class="alert alert-success">Статус успешно изменен!</div>
             {% elif message == 'reply' %}
             <div class="alert alert-success">Ответ успешно отправлен студенту в Telegram!</div>
-            {% elif error %}
-            <div class="alert alert-danger">Произошла ошибка при отправке сообщения.</div>
             {% endif %}
 
             <div class="row g-4">
-                <!-- Данные и переписка -->
                 <div class="col-lg-8">
                     <!-- Данные студента -->
                     <div class="card p-4 mb-4">
@@ -82,12 +82,12 @@
                                 <span class="badge bg-secondary">{{ report.module }}</span>
                             </div>
                             <div class="col-sm-6">
-                                <small class="text-muted d-block">Telegram аккаунт</small>
+                                <small class="text-muted d-block">Telegram</small>
                                 <span>
                                     {% if report.username %}
                                         <a href="https://t.me/{{ report.username }}" target="_blank">@{{ report.username }}</a>
                                     {% else %}
-                                        <span class="text-muted">Не указан (ID: {{ report.user_id or '-' }})</span>
+                                        <span class="text-muted">ID: {{ report.user_id or '-' }}</span>
                                     {% endif %}
                                 </span>
                             </div>
@@ -105,56 +105,66 @@
                         {% endif %}
                     </div>
 
-                    <!-- История переписки -->
+                    <!-- Live Переписка -->
                     <div class="card p-4 mb-4">
-                        <h5 class="fw-bold mb-3">💬 История переписки</h5>
-                        <div class="chat-box p-3 mb-3">
-                            {% if chat_messages and chat_messages|length > 0 %}
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold mb-0">💬 История переписки</h5>
+                            <span class="badge bg-success" id="liveBadge">🟢 Live</span>
+                        </div>
+                        
+                        <div class="chat-box p-3 mb-3" id="chatContainer">
+                            {% if chat_messages %}
                                 {% for msg in chat_messages %}
                                     {% if msg.sender_type == 'staff' %}
-                                    <div class="d-flex flex-column align-items-end mb-3">
+                                    <div class="d-flex flex-column align-items-end mb-3" data-msg-id="{{ msg.id }}">
                                         <div class="msg-staff p-3 shadow-sm text-break">
                                             <div class="small fw-bold border-bottom border-light pb-1 mb-1">{{ msg.sender_name }}</div>
                                             <div>{{ msg.message_text }}</div>
                                         </div>
                                         <small class="text-muted mt-1" style="font-size: 0.75rem;">
-                                            {% if msg.created_at and msg.created_at.strftime %}
-                                                {{ msg.created_at.strftime('%H:%M | %d.%m.%Y') }}
-                                            {% else %}
-                                                {{ msg.created_at }}
-                                            {% endif %}
+                                            {{ msg.created_at.strftime('%H:%M | %d.%m.%Y') if msg.created_at and msg.created_at.strftime else msg.created_at }}
                                         </small>
                                     </div>
                                     {% else %}
-                                    <div class="d-flex flex-column align-items-start mb-3">
+                                    <div class="d-flex flex-column align-items-start mb-3" data-msg-id="{{ msg.id }}">
                                         <div class="msg-student p-3 shadow-sm text-break">
                                             <div class="small fw-bold text-primary border-bottom pb-1 mb-1">Студент: {{ msg.sender_name }}</div>
                                             <div>{{ msg.message_text }}</div>
                                         </div>
                                         <small class="text-muted mt-1" style="font-size: 0.75rem;">
-                                            {% if msg.created_at and msg.created_at.strftime %}
-                                                {{ msg.created_at.strftime('%H:%M | %d.%m.%Y') }}
-                                            {% else %}
-                                                {{ msg.created_at }}
-                                            {% endif %}
+                                            {{ msg.created_at.strftime('%H:%M | %d.%m.%Y') if msg.created_at and msg.created_at.strftime else msg.created_at }}
                                         </small>
                                     </div>
                                     {% endif %}
                                 {% endfor %}
                             {% else %}
-                                <div class="text-center text-muted py-4">
-                                    <i>Переписка пока пуста. Отправьте первое сообщение ниже.</i>
+                                <div class="text-center text-muted py-4" id="emptyChatNotice">
+                                    <i>Переписка пока пуста. Отправьте сообщение ниже.</i>
                                 </div>
                             {% endif %}
                         </div>
 
-                        <!-- Отправка сообщения -->
-                        <h6 class="fw-bold mb-2">↩ Ответить студенту в Telegram</h6>
+                        <!-- Отправка ответа + шаблоны -->
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="fw-bold mb-0">↩ Ответить студенту:</h6>
+                            {% if quick_templates %}
+                            <div class="d-flex align-items-center">
+                                <small class="text-muted me-2">Вставить шаблон:</small>
+                                <select class="form-select form-select-sm" id="templateSelect" style="max-width: 220px;" onchange="applyTemplate()">
+                                    <option value="">-- Выберите шаблон --</option>
+                                    {% for tpl in quick_templates %}
+                                    <option value="{{ tpl.text }}">{{ tpl.title }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            {% endif %}
+                        </div>
+
                         <form method="POST" action="/admin/reports/{{ report.id }}/reply">
                             <div class="mb-3">
-                                <textarea name="message" class="form-control" rows="3" placeholder="Введите текст сообщения..." required></textarea>
+                                <textarea name="message" id="replyTextarea" class="form-control" rows="3" placeholder="Введите текст сообщения..." required></textarea>
                             </div>
-                            <button type="submit" class="btn btn-primary">Отправить сообщение</button>
+                            <button type="submit" class="btn btn-primary">Отправить в Telegram</button>
                         </form>
                     </div>
                 </div>
@@ -179,5 +189,69 @@
         </div>
     </div>
 </div>
+
+<script>
+    // Прокрутка чата вниз
+    const chatContainer = document.getElementById('chatContainer');
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+
+    // Вставка быстрого шаблона
+    function applyTemplate() {
+        const select = document.getElementById('templateSelect');
+        const textarea = document.getElementById('replyTextarea');
+        if (select && select.value) {
+            textarea.value = select.value;
+        }
+    }
+
+    // Live Polling новых сообщений
+    let lastMsgId = 0;
+    const existingMsgs = document.querySelectorAll('[data-msg-id]');
+    if (existingMsgs.length > 0) {
+        lastMsgId = parseInt(existingMsgs[existingMsgs.length - 1].getAttribute('data-msg-id')) || 0;
+    }
+
+    setInterval(async () => {
+        try {
+            const res = await fetch(`/admin/reports/{{ report.id }}/messages/poll?last_id=${lastMsgId}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.messages && data.messages.length > 0) {
+                const emptyNotice = document.getElementById('emptyChatNotice');
+                if (emptyNotice) emptyNotice.remove();
+
+                data.messages.forEach(msg => {
+                    lastMsgId = Math.max(lastMsgId, msg.id);
+                    const msgDiv = document.createElement('div');
+                    if (msg.sender_type === 'staff') {
+                        msgDiv.className = 'd-flex flex-column align-items-end mb-3';
+                        msgDiv.setAttribute('data-msg-id', msg.id);
+                        msgDiv.innerHTML = `
+                            <div class="msg-staff p-3 shadow-sm text-break">
+                                <div class="small fw-bold border-bottom border-light pb-1 mb-1">${msg.sender_name}</div>
+                                <div>${msg.message_text}</div>
+                            </div>
+                            <small class="text-muted mt-1" style="font-size: 0.75rem;">${msg.created_at}</small>
+                        `;
+                    } else {
+                        msgDiv.className = 'd-flex flex-column align-items-start mb-3';
+                        msgDiv.setAttribute('data-msg-id', msg.id);
+                        msgDiv.innerHTML = `
+                            <div class="msg-student p-3 shadow-sm text-break">
+                                <div class="small fw-bold text-primary border-bottom pb-1 mb-1">Студент: ${msg.sender_name}</div>
+                                <div>${msg.message_text}</div>
+                            </div>
+                            <small class="text-muted mt-1" style="font-size: 0.75rem;">${msg.created_at}</small>
+                        `;
+                    }
+                    chatContainer.appendChild(msgDiv);
+                });
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        } catch (e) {
+            console.error("Live chat poll error:", e);
+        }
+    }, 3000);
+</script>
 </body>
 </html>

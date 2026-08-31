@@ -14,7 +14,7 @@ import psycopg
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
@@ -72,21 +72,13 @@ ADMIN_IDS = {int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.
 DEVELOPER_IDS = {int(x.strip()) for x in os.getenv("DEVELOPER_IDS", "").split(",") if x.strip()}
 SUPER_ADMIN_IDS = {548200976}
 
-NAME, GROUP, MODULE, ACADEMIC_STATUS, DESCRIPTION, SCREENSHOT = range(6)
+NAME, GROUP, MODULE, ACADEMIC_STATUS, DESCRIPTION, SMART_FAQ_WAIT, SCREENSHOT = range(7)
 STAFF_REPORT_ID = 100
 STAFF_FILTER_MODULE = 101
 STAFF_SET_STATUS_ID = 102
 STAFF_SET_STATUS_VALUE = 103
 STAFF_TAKE_REPORT_ID = 104
 STAFF_RESOLVE_REPORT_ID = 105
-
-MODULES = [
-    "Регистрация на дисциплины",
-    "Общежитие",
-    "Платежи",
-    "Приемная комиссия",
-    "Другое",
-]
 
 STATUSES = ["Новая", "В работе", "Решено"]
 
@@ -142,7 +134,61 @@ async def init_db():
                     created_at TIMESTAMP NOT NULL DEFAULT NOW()
                 )
             """)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_modules (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quick_templates (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS smart_faq_rules (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    keywords TEXT NOT NULL,
+                    reply_text TEXT NOT NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            
+            # Заполняем базовые модули, если таблица пуста
+            await cursor.execute("SELECT COUNT(*) FROM system_modules")
+            if (await cursor.fetchone())["count"] == 0:
+                default_modules = ["Регистрация на дисциплины", "Общежитие", "Платежи", "Приемная комиссия", "Другое"]
+                for m in default_modules:
+                    await cursor.execute("INSERT INTO system_modules (name) VALUES (%s) ON CONFLICT DO NOTHING", (m,))
+
         await conn.commit()
+
+async def get_active_modules() -> list[str]:
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT name FROM system_modules WHERE is_active = TRUE ORDER BY id ASC")
+            rows = await cursor.fetchall()
+            return [r["name"] for r in rows] if rows else ["Другое"]
+
+async def check_smart_faq(text: str) -> dict | None:
+    lower_text = text.lower()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, title, keywords, reply_text FROM smart_faq_rules WHERE is_active = TRUE")
+            rules = await cursor.fetchall()
+            for rule in rules:
+                keywords = [k.strip().lower() for k in rule["keywords"].split(",") if k.strip()]
+                for kw in keywords:
+                    if kw in lower_text:
+                        return rule
+    return None
 
 # =========================
 # ROLES & UI
@@ -259,19 +305,23 @@ def build_report_text(report_id: int, created_at: datetime, name: str, group_nam
     )
 
 async def save_ticket_message(report_id: int, sender_type: str, sender_name: str, message_text: str):
-    async with await get_conn_async() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-                INSERT INTO ticket_messages (report_id, sender_type, sender_name, message_text)
-                VALUES (%s, %s, %s, %s)
-            """, (report_id, sender_type, sender_name, message_text))
-        await conn.commit()
+    created_at = datetime.now()
+    try:
+        async with await get_conn_async() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO ticket_messages (report_id, sender_type, sender_name, message_text, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (report_id, sender_type, sender_name, message_text, created_at))
+            await conn.commit()
+    except Exception as e:
+        logger.error(f"Ошибка сохранения сообщения тикета: {e}")
 
 async def get_ticket_messages(report_id: int) -> list[dict]:
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("""
-                SELECT sender_type, sender_name, message_text, created_at
+                SELECT id, sender_type, sender_name, message_text, created_at
                 FROM ticket_messages
                 WHERE report_id = %s
                 ORDER BY id ASC
@@ -376,7 +426,7 @@ class WebActor:
     def __init__(self, username: str):
         self.id = None
         self.username = None
-        self.full_name = f"Веб-панель: {username}"
+        self.full_name = f"Веб-панель ({username})"
         self.role_name = "Веб-панель"
 
 def create_admin_session(username: str) -> str:
@@ -429,7 +479,7 @@ async def get_reports_async(status_filter: str | None = None, module_filter: str
     if status_filter and status_filter in STATUSES:
         conditions.append("status = %s")
         params.append(status_filter)
-    if module_filter and module_filter in MODULES:
+    if module_filter:
         conditions.append("module = %s")
         params.append(module_filter)
     if search:
@@ -467,7 +517,7 @@ def get_reports(status_filter: str | None = None, module_filter: str | None = No
     if status_filter and status_filter in STATUSES:
         conditions.append("status = %s")
         params.append(status_filter)
-    if module_filter and module_filter in MODULES:
+    if module_filter:
         conditions.append("module = %s")
         params.append(module_filter)
     if search:
@@ -498,12 +548,6 @@ async def get_report_async(report_id: int) -> dict | None:
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
             return await cursor.fetchone()
-
-def get_report(report_id: int) -> dict | None:
-    with get_sync_conn() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
-            return cursor.fetchone()
 
 async def update_report_status_in_db_async(report_id: int, new_status: str) -> dict | None:
     async with await get_conn_async() as conn:
@@ -594,7 +638,7 @@ def build_reports_excel(rows: list[dict]) -> BytesIO:
     return file_stream
 
 # =========================
-# COMMANDS & FLOW
+# BOT FLOW & CONVERSATION
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -602,8 +646,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     role = get_role_name(user.id)
     text = (
-        "✨ Добро пожаловать в бот поддержки!\n\n"
-        "Здесь можно отправить обращение или сообщить о возникшей проблеме.\n\n"
+        "✨ Добро пожаловать в бот поддержки Astana IT University!\n\n"
+        "Здесь можно отправить обращение или задать вопрос.\n\n"
         "📌 Доступные команды:\n"
         "• /report — отправить заявку\n"
         "• /faq — частые вопросы\n"
@@ -653,12 +697,22 @@ async def restart_bot_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user or user.id not in SUPER_ADMIN_IDS:
         await update.message.reply_text("⛔️ У вас нет прав на эту команду.")
         return
-    await update.message.reply_text("🔄 Перезапускаю службу бота...")
+
+    msg = await update.message.reply_text("🔄 Перезапускаю службу бота... Сообщение исчезнет через 10 секунд.")
+    chat_id = update.effective_chat.id
+    user_msg_id = update.message.message_id
+    bot_msg_id = msg.message_id
+
+    cleanup_and_restart_script = (
+        f"sleep 10 && "
+        f"curl -s -X POST 'https://api.telegram.org/bot{TOKEN}/deleteMessage' -d 'chat_id={chat_id}&message_id={user_msg_id}' > /dev/null && "
+        f"curl -s -X POST 'https://api.telegram.org/bot{TOKEN}/deleteMessage' -d 'chat_id={chat_id}&message_id={bot_msg_id}' > /dev/null && "
+        f"/usr/bin/sudo /usr/bin/systemctl restart mydu-bot"
+    )
     try:
-        # Указываем полные абсолютные пути к утилитам
-        subprocess.Popen(["/usr/bin/sudo", "/usr/bin/systemctl", "restart", "mydu-bot"])
+        subprocess.Popen(cleanup_and_restart_script, shell=True)
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка перезапуска: {e}")
+        logger.error(f"Ошибка перезапуска: {e}")
 
 async def report_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -673,8 +727,16 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["group"] = update.message.text.strip()
-    keyboard = [["Регистрация на дисциплины", "Общежитие"], ["Платежи", "Приемная комиссия"], ["Другое"]]
-    await update.message.reply_text("Выберите модуль:", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True))
+    modules_list = await get_active_modules()
+    # Строим клавиатуру парами кнопок
+    keyboard = []
+    for i in range(0, len(modules_list), 2):
+        keyboard.append(modules_list[i:i+2])
+
+    await update.message.reply_text(
+        "Выберите модуль обращения:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    )
     return MODULE
 
 async def get_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -683,12 +745,12 @@ async def get_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chosen_module == "Приемная комиссия":
         keyboard = [["🎓 Бакалавриат"], ["📚 Магистратура"], ["🔬 Докторантура (PhD)"]]
         await update.message.reply_text(
-            "Пожалуйста, выберите ваш академический статус для поступления в Astana IT University:",
+            "Пожалуйста, выберите ваш академический статус:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
         )
         return ACADEMIC_STATUS
     else:
-        await update.message.reply_text("Опишите проблему:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Опишите возникшую проблему:", reply_markup=ReplyKeyboardRemove())
         return DESCRIPTION
 
 async def get_academic_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -697,9 +759,40 @@ async def get_academic_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     return DESCRIPTION
 
 async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["description"] = update.message.text.strip()
-    await update.message.reply_text("Теперь отправьте скриншот или нажмите кнопку: Пропустить", reply_markup=get_skip_screenshot_keyboard())
+    desc = update.message.text.strip()
+    context.user_data["description"] = desc
+
+    # Проверяем Smart FAQ автоответ
+    faq_match = await check_smart_faq(desc)
+    if faq_match:
+        faq_keyboard = [
+            ["✅ Спасибо, проблема решена"],
+            ["✉️ Все равно создать заявку"]
+        ]
+        text = (
+            f"💡 **Возможно, это вам поможет:**\n\n"
+            f"{faq_match['reply_text']}\n\n"
+            f"Помог ли данный ответ?"
+        )
+        await update.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(faq_keyboard, resize_keyboard=True, one_time_keyboard=True)
+        )
+        return SMART_FAQ_WAIT
+
+    await update.message.reply_text("Теперь отправьте скриншот ошибки или нажмите кнопку: Пропустить", reply_markup=get_skip_screenshot_keyboard())
     return SCREENSHOT
+
+async def handle_smart_faq_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_choice = update.message.text.strip()
+    if user_choice == "✅ Спасибо, проблема решена":
+        context.user_data.clear()
+        await update.message.reply_text("Рады были помочь! Обращение отменено.", reply_markup=ReplyKeyboardRemove())
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("Хорошо, продолжим. Отправьте скриншот или нажмите кнопку: Пропустить", reply_markup=get_skip_screenshot_keyboard())
+        return SCREENSHOT
 
 async def get_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     screenshot_file_id = None
@@ -854,8 +947,9 @@ async def filter_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user or not is_staff(user.id):
         return
+    modules_list = await get_active_modules()
     if not context.args:
-        modules_text = "\n".join(f"- {m}" for m in MODULES)
+        modules_text = "\n".join(f"- {m}" for m in modules_list)
         await update.message.reply_text(f"Использование: /filter_module Платежи\n\nМодули:\n{modules_text}")
         return
     module_name = " ".join(context.args).strip()
@@ -959,7 +1053,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 sent = await context.bot.send_message(chat_id=row["user_id"], text=full_student_message)
                 await save_student_report_message(report_id, row["user_id"], sent.message_id)
-                await save_ticket_message(report_id, "staff", f"Шаблон: {user.full_name}", template_text)
+                await save_ticket_message(report_id, "staff", f"Шаблон ({user.full_name})", template_text)
             except Exception:
                 pass
 
@@ -1006,7 +1100,7 @@ async def student_reply_router(update: Update, context: ContextTypes.DEFAULT_TYP
     if not user or not message or not message.text or is_staff(user.id) or context.user_data.get("report_in_progress"):
         return
 
-    ignored = {"Пропустить", "Новые заявки", "Последние заявки", "Поиск по ID", "Фильтр по модулю", "Изменить статус", "Взять в работу", "Отметить решённой", "Выгрузить Excel", "Скрыть меню"}
+    ignored = {"Пропустить", "Новые заявки", "Последние заявки", "Поиск по ID", "Фильтр по модулю", "Изменить статус", "Взять в работу", "Отметить решённой", "Выгрузить Excel", "Скрыть меню", "✅ Спасибо, проблема решена", "✉️ Все равно создать заявку"}
     if message.text.strip() in ignored:
         return
 
@@ -1054,7 +1148,8 @@ async def staff_button_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Введите номер заявки:")
         return STAFF_REPORT_ID
     elif text == "Фильтр по модулю":
-        await update.message.reply_text("Введите название модуля:\n\n" + "\n".join(MODULES))
+        modules_list = await get_active_modules()
+        await update.message.reply_text("Введите название модуля:\n\n" + "\n".join(modules_list))
         return STAFF_FILTER_MODULE
     elif text == "Изменить статус":
         await update.message.reply_text("Введите ID заявки:")
@@ -1134,6 +1229,7 @@ report_conv_handler = ConversationHandler(
         MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_module)],
         ACADEMIC_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_academic_status)],
         DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_description)],
+        SMART_FAQ_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_smart_faq_decision)],
         SCREENSHOT: [
             MessageHandler(filters.PHOTO, get_screenshot),
             MessageHandler(filters.TEXT & ~filters.COMMAND, get_screenshot),
@@ -1191,20 +1287,8 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, staff_r
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, student_reply_router), group=20)
 
 # =========================
-# FASTAPI DASHBOARD
+# FASTAPI ADMIN ROUTES
 # =========================
-@app.post("/admin/reports/bulk-action")
-async def admin_reports_bulk_action(request: Request, action: str = Form(...), report_ids: list[int] = Form(default=[])):
-    admin_username = get_admin_username(request)
-    if not admin_username:
-        return admin_redirect()
-    if not report_ids:
-        return RedirectResponse(url="/admin?message=no_selected", status_code=303)
-    target_status = "В работе" if action == "take" else "Решено"
-    for r_id in report_ids:
-        await apply_report_status_change(r_id, target_status, WebActor(admin_username))
-    return RedirectResponse(url="/admin?message=bulk_success", status_code=303)
-
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_page(request: Request):
     if get_admin_username(request):
@@ -1237,11 +1321,10 @@ async def admin_dashboard(request: Request, status: str | None = None, module: s
         return admin_redirect()
     if status and status not in STATUSES:
         status = None
-    if module and module not in MODULES:
-        module = None
     if page < 1:
         page = 1
 
+    all_modules = await get_active_modules()
     per_page = 20
     counts = await get_dashboard_counts_async()
     reports, total_filtered = await get_reports_async(status_filter=status, module_filter=module, search=q, page=page, per_page=per_page)
@@ -1249,24 +1332,14 @@ async def admin_dashboard(request: Request, status: str | None = None, module: s
 
     return templates.TemplateResponse(request, "dashboard.html", {
         "request": request, "admin_username": admin_username, "counts": counts, "reports": reports,
-        "statuses": STATUSES, "modules": MODULES, "selected_status": status or "", "selected_module": module or "",
+        "statuses": STATUSES, "modules": all_modules, "selected_status": status or "", "selected_module": module or "",
         "query": q or "", "active_page": "dashboard", "message": request.query_params.get("message"),
         "current_page": page, "total_pages": total_pages, "total_filtered": total_filtered
     })
 
 @app.get("/admin/reports")
-async def admin_reports(request: Request):
+async def admin_reports_redirect():
     return RedirectResponse(url="/admin", status_code=303)
-
-@app.get("/admin/reports/export.xlsx")
-async def admin_export_reports(request: Request):
-    if not get_admin_username(request):
-        return admin_redirect()
-    reports_list = get_reports(limit=None)
-    loop = asyncio.get_running_loop()
-    file_stream = await loop.run_in_executor(None, build_reports_excel, reports_list)
-    filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return StreamingResponse(file_stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 @app.get("/admin/reports/{report_id}", response_class=HTMLResponse)
 async def admin_report_detail(request: Request, report_id: int):
@@ -1277,12 +1350,50 @@ async def admin_report_detail(request: Request, report_id: int):
     if not report:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
 
-    chat_messages = await get_ticket_messages(report_id)
+    chat_messages = []
+    try:
+        chat_messages = await get_ticket_messages(report_id)
+    except Exception as e:
+        logger.error(f"Ошибка получения сообщений тикета: {e}")
+
+    # Загружаем шаблоны быстрых ответов
+    templates_list = []
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, title, text FROM quick_templates ORDER BY id ASC")
+            templates_list = await cursor.fetchall()
+
     return templates.TemplateResponse(request, "report_detail.html", {
         "request": request, "admin_username": admin_username, "report": report,
-        "chat_messages": chat_messages, "statuses": STATUSES, "modules": MODULES,
+        "chat_messages": chat_messages, "statuses": STATUSES, "quick_templates": templates_list,
         "active_page": "reports", "message": request.query_params.get("message"), "error": request.query_params.get("error"),
     })
+
+# API: Live-чат (JSON polling новых сообщений)
+@app.get("/admin/reports/{report_id}/messages/poll")
+async def admin_poll_messages(request: Request, report_id: int, last_id: int = 0):
+    if not get_admin_username(request):
+        return JSONResponse(status_code=403, content={"error": "unauthorized"})
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT id, sender_type, sender_name, message_text, created_at
+                FROM ticket_messages
+                WHERE report_id = %s AND id > %s
+                ORDER BY id ASC
+            """, (report_id, last_id))
+            rows = await cursor.fetchall()
+            messages = []
+            for r in rows:
+                dt_str = r["created_at"].strftime('%H:%M | %d.%m.%Y') if hasattr(r["created_at"], "strftime") else str(r["created_at"])
+                messages.append({
+                    "id": r["id"],
+                    "sender_type": r["sender_type"],
+                    "sender_name": r["sender_name"],
+                    "message_text": r["message_text"],
+                    "created_at": dt_str
+                })
+            return JSONResponse(content={"messages": messages})
 
 @app.get("/admin/reports/{report_id}/screenshot")
 async def admin_report_screenshot(request: Request, report_id: int):
@@ -1299,15 +1410,11 @@ async def admin_report_screenshot(request: Request, report_id: int):
     return Response(content=bytes(image_bytes), media_type="image/jpeg")
 
 @app.post("/admin/reports/{report_id}/status")
-async def admin_report_status(request: Request, report_id: int, status: str = Form(...), next_url: str = Form(default="")):
+async def admin_report_status(request: Request, report_id: int, status: str = Form(...)):
     admin_username = get_admin_username(request)
     if not admin_username:
         return admin_redirect()
-    success = await apply_report_status_change(report_id, status, WebActor(admin_username))
-    if not success:
-        return RedirectResponse(url=f"/admin/reports/{report_id}?error=status", status_code=303)
-    if next_url.startswith("/admin"):
-        return RedirectResponse(url=next_url, status_code=303)
+    await apply_report_status_change(report_id, status, WebActor(admin_username))
     return RedirectResponse(url=f"/admin/reports/{report_id}?message=status", status_code=303)
 
 @app.post("/admin/reports/{report_id}/reply")
@@ -1318,34 +1425,167 @@ async def admin_report_reply(request: Request, report_id: int, message: str = Fo
     message_text = message.strip()
     if not message_text:
         return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply_empty", status_code=303)
-
     success = await send_reply_to_student_from_admin(report_id, message_text, WebActor(admin_username))
     if not success:
         return RedirectResponse(url=f"/admin/reports/{report_id}?error=reply", status_code=303)
     return RedirectResponse(url=f"/admin/reports/{report_id}?message=reply", status_code=303)
 
-@app.post("/admin/report/{report_id}/take")
-async def admin_take_report(request: Request, report_id: int):
+# -----------------
+# УПРАВЛЕНИЕ МОДУЛЯМИ
+# -----------------
+@app.get("/admin/modules", response_class=HTMLResponse)
+async def admin_modules_page(request: Request):
     admin_username = get_admin_username(request)
     if not admin_username:
         return admin_redirect()
-    await apply_report_status_change(report_id, "В работе", WebActor(admin_username))
-    return RedirectResponse(url="/admin", status_code=303)
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, name, is_active, created_at FROM system_modules ORDER BY id ASC")
+            modules_list = await cursor.fetchall()
+    return templates.TemplateResponse(request, "modules.html", {
+        "request": request, "admin_username": admin_username, "modules": modules_list,
+        "active_page": "modules", "message": request.query_params.get("message")
+    })
 
-@app.post("/admin/report/{report_id}/resolve")
-async def admin_resolve_report(request: Request, report_id: int):
+@app.post("/admin/modules/add")
+async def admin_modules_add(request: Request, name: str = Form(...)):
+    if not get_admin_username(request):
+        return admin_redirect()
+    name = name.strip()
+    if name:
+        async with await get_conn_async() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("INSERT INTO system_modules (name) VALUES (%s) ON CONFLICT DO NOTHING", (name,))
+            await conn.commit()
+    return RedirectResponse(url="/admin/modules?message=added", status_code=303)
+
+@app.post("/admin/modules/{module_id}/toggle")
+async def admin_modules_toggle(request: Request, module_id: int):
+    if not get_admin_username(request):
+        return admin_redirect()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE system_modules SET is_active = NOT is_active WHERE id = %s", (module_id,))
+        await conn.commit()
+    return RedirectResponse(url="/admin/modules?message=updated", status_code=303)
+
+@app.post("/admin/modules/{module_id}/delete")
+async def admin_modules_delete(request: Request, module_id: int):
+    if not get_admin_username(request):
+        return admin_redirect()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("DELETE FROM system_modules WHERE id = %s", (module_id,))
+        await conn.commit()
+    return RedirectResponse(url="/admin/modules?message=deleted", status_code=303)
+
+# -----------------
+# УПРАВЛЕНИЕ ШАБЛОНАМИ
+# -----------------
+@app.get("/admin/templates", response_class=HTMLResponse)
+async def admin_templates_page(request: Request):
     admin_username = get_admin_username(request)
     if not admin_username:
         return admin_redirect()
-    await apply_report_status_change(report_id, "Решено", WebActor(admin_username))
-    return RedirectResponse(url="/admin", status_code=303)
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, title, text, created_at FROM quick_templates ORDER BY id ASC")
+            templates_list = await cursor.fetchall()
+    return templates.TemplateResponse(request, "templates.html", {
+        "request": request, "admin_username": admin_username, "templates": templates_list,
+        "active_page": "templates", "message": request.query_params.get("message")
+    })
+
+@app.post("/admin/templates/add")
+async def admin_templates_add(request: Request, title: str = Form(...), text: str = Form(...)):
+    if not get_admin_username(request):
+        return admin_redirect()
+    title, text = title.strip(), text.strip()
+    if title and text:
+        async with await get_conn_async() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("INSERT INTO quick_templates (title, text) VALUES (%s, %s)", (title, text))
+            await conn.commit()
+    return RedirectResponse(url="/admin/templates?message=added", status_code=303)
+
+@app.post("/admin/templates/{tpl_id}/delete")
+async def admin_templates_delete(request: Request, tpl_id: int):
+    if not get_admin_username(request):
+        return admin_redirect()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("DELETE FROM quick_templates WHERE id = %s", (tpl_id,))
+        await conn.commit()
+    return RedirectResponse(url="/admin/templates?message=deleted", status_code=303)
+
+# -----------------
+# SMART FAQ (АВТООТВЕТЫ)
+# -----------------
+@app.get("/admin/smart-faq", response_class=HTMLResponse)
+async def admin_smart_faq_page(request: Request):
+    admin_username = get_admin_username(request)
+    if not admin_username:
+        return admin_redirect()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, title, keywords, reply_text, is_active FROM smart_faq_rules ORDER BY id ASC")
+            rules = await cursor.fetchall()
+    return templates.TemplateResponse(request, "smart_faq.html", {
+        "request": request, "admin_username": admin_username, "rules": rules,
+        "active_page": "smart_faq", "message": request.query_params.get("message")
+    })
+
+@app.post("/admin/smart-faq/add")
+async def admin_smart_faq_add(request: Request, title: str = Form(...), keywords: str = Form(...), reply_text: str = Form(...)):
+    if not get_admin_username(request):
+        return admin_redirect()
+    title, keywords, reply_text = title.strip(), keywords.strip(), reply_text.strip()
+    if title and keywords and reply_text:
+        async with await get_conn_async() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("INSERT INTO smart_faq_rules (title, keywords, reply_text) VALUES (%s, %s, %s)", (title, keywords, reply_text))
+            await conn.commit()
+    return RedirectResponse(url="/admin/smart-faq?message=added", status_code=303)
+
+@app.post("/admin/smart-faq/{rule_id}/toggle")
+async def admin_smart_faq_toggle(request: Request, rule_id: int):
+    if not get_admin_username(request):
+        return admin_redirect()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE smart_faq_rules SET is_active = NOT is_active WHERE id = %s", (rule_id,))
+        await conn.commit()
+    return RedirectResponse(url="/admin/smart-faq?message=updated", status_code=303)
+
+@app.post("/admin/smart-faq/{rule_id}/delete")
+async def admin_smart_faq_delete(request: Request, rule_id: int):
+    if not get_admin_username(request):
+        return admin_redirect()
+    async with await get_conn_async() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("DELETE FROM smart_faq_rules WHERE id = %s", (rule_id,))
+        await conn.commit()
+    return RedirectResponse(url="/admin/smart-faq?message=deleted", status_code=303)
+
+# -----------------
+# SYSTEM & EXCEL
+# -----------------
+@app.get("/admin/reports/export.xlsx")
+async def admin_export_reports(request: Request):
+    if not get_admin_username(request):
+        return admin_redirect()
+    reports_list = get_reports(limit=None)
+    loop = asyncio.get_running_loop()
+    file_stream = await loop.run_in_executor(None, build_reports_excel, reports_list)
+    filename = f"reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(file_stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 @app.post("/admin/system/restart")
 async def admin_system_restart(request: Request):
     admin_username = get_admin_username(request)
     if not admin_username:
         return admin_redirect()
-    subprocess.Popen(["sudo", "systemctl", "restart", "mydu-bot"])
+    subprocess.Popen(["/usr/bin/sudo", "/usr/bin/systemctl", "restart", "mydu-bot"])
     return RedirectResponse(url="/admin?message=restarting", status_code=303)
 
 @app.on_event("startup")
