@@ -12,16 +12,38 @@
             --sidebar-hover: #1e293b;
             --main-bg: #f8fafc;
         }
-        body { background-color: var(--main-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .sidebar { background-color: var(--sidebar-bg); min-height: 100vh; color: #94a3b8; }
-        .sidebar .nav-link {
-            color: #94a3b8; font-weight: 500; padding: 10px 16px; border-radius: 8px; margin-bottom: 6px;
-            transition: all 0.2s ease; display: flex; align-items: center; text-decoration: none;
+        body { 
+            background-color: var(--main-bg); 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            margin: 0;
+            padding: 0;
         }
-        .sidebar .nav-link:hover { color: #ffffff; background-color: var(--sidebar-hover); }
-        .sidebar .nav-link.active { color: #ffffff; background-color: #1e293b; }
-        .sidebar .nav-link i { font-size: 1.1rem; margin-right: 12px; }
-        .brand-header { padding: 24px 16px 20px 16px; text-align: center; }
+        .sidebar-fixed { 
+            background-color: var(--sidebar-bg); 
+            height: 100vh; 
+            position: sticky; 
+            top: 0; 
+            z-index: 100;
+            color: #94a3b8; 
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .sidebar-fixed .nav-link {
+            color: #94a3b8; 
+            font-weight: 500; 
+            padding: 10px 16px; 
+            border-radius: 8px; 
+            margin-bottom: 6px;
+            transition: all 0.2s ease; 
+            display: flex; 
+            align-items: center; 
+            text-decoration: none;
+        }
+        .sidebar-fixed .nav-link:hover { color: #ffffff; background-color: var(--sidebar-hover); }
+        .sidebar-fixed .nav-link.active { color: #ffffff; background-color: #1e293b; }
+        .sidebar-fixed .nav-link i { font-size: 1.1rem; margin-right: 12px; }
+        .brand-header { padding: 20px 16px 16px 16px; text-align: center; }
         .brand-title { color: #ffffff; font-weight: 800; letter-spacing: 0.5px; margin-bottom: 2px; font-size: 1.05rem; }
         .brand-subtitle { color: #38bdf8; font-weight: 700; letter-spacing: 1.5px; font-size: 0.75rem; }
         .card-stat { border: none; border-radius: 12px; transition: transform 0.2s; }
@@ -31,10 +53,10 @@
 <body>
 <div class="container-fluid p-0">
     <div class="row g-0">
-        <!-- Боковая панель -->
-        <div class="col-auto col-md-3 col-lg-2 sidebar d-flex flex-column justify-content-between p-3">
+        <!-- Левый сайдбар (зафиксирован на экране) -->
+        <div class="col-auto col-md-3 col-lg-2 sidebar-fixed p-3">
             <div>
-                <div class="brand-header border-bottom border-secondary border-opacity-25 mb-4">
+                <div class="brand-header border-bottom border-secondary border-opacity-25 mb-3">
                     <div class="brand-title">ASTANA IT</div>
                     <div class="brand-subtitle">HELP-DESK</div>
                 </div>
@@ -73,10 +95,13 @@
                 </ul>
             </div>
 
-            <div class="pt-4 border-top border-secondary border-opacity-25 text-center">
+            <!-- Блок профиля и кнопка Выйти -->
+            <div class="pt-3 pb-2 border-top border-secondary border-opacity-25 text-center">
                 <div class="small text-muted mb-2">Вы вошли как:<br><span class="text-white fw-semibold">{{ admin_username }}</span></div>
-                <form method="POST" action="/admin/logout">
-                    <button type="submit" class="btn btn-danger btn-sm w-100">Выйти</button>
+                <form method="POST" action="/admin/logout" class="m-0">
+                    <button type="submit" class="btn btn-danger btn-sm w-100 fw-bold">
+                        <i class="bi bi-box-arrow-right me-1"></i> Выйти
+                    </button>
                 </form>
             </div>
         </div>
