@@ -7,38 +7,87 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
-        body { background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .sidebar { background-color: #0f172a; min-height: 100vh; color: #fff; }
-        .sidebar a { color: #94a3b8; text-decoration: none; display: block; padding: 10px 16px; border-radius: 8px; margin-bottom: 4px; }
-        .sidebar a:hover, .sidebar a.active { background-color: #1e293b; color: #fff; }
+        :root {
+            --sidebar-bg: #0f172a;
+            --sidebar-hover: #1e293b;
+            --main-bg: #f8fafc;
+        }
+        body { background-color: var(--main-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .sidebar { background-color: var(--sidebar-bg); min-height: 100vh; color: #94a3b8; }
+        .sidebar .nav-link {
+            color: #94a3b8; font-weight: 500; padding: 10px 16px; border-radius: 8px; margin-bottom: 6px;
+            transition: all 0.2s ease; display: flex; align-items: center; text-decoration: none;
+        }
+        .sidebar .nav-link:hover { color: #ffffff; background-color: var(--sidebar-hover); }
+        .sidebar .nav-link.active { color: #ffffff; background-color: #1e293b; }
+        .sidebar .nav-link i { font-size: 1.1rem; margin-right: 12px; }
+        .brand-header { padding: 24px 16px 20px 16px; text-align: center; }
+        .brand-title { color: #ffffff; font-weight: 800; letter-spacing: 0.5px; margin-bottom: 2px; font-size: 1.05rem; }
+        .brand-subtitle { color: #38bdf8; font-weight: 700; letter-spacing: 1.5px; font-size: 0.75rem; }
         .card { border: none; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body>
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-2 d-none d-md-block sidebar p-3">
-            <div class="text-center py-3 mb-4 border-bottom border-secondary">
-                <h6 class="fw-bold mb-0 text-white">ASTANA IT</h6>
-                <small class="text-info fw-bold">HELP-DESK</small>
+<div class="container-fluid p-0">
+    <div class="row g-0">
+        <!-- Боковая панель -->
+        <div class="col-auto col-md-3 col-lg-2 sidebar d-flex flex-column justify-content-between p-3">
+            <div>
+                <div class="brand-header border-bottom border-secondary border-opacity-25 mb-4">
+                    <div class="brand-title">ASTANA IT</div>
+                    <div class="brand-subtitle">HELP-DESK</div>
+                </div>
+
+                <ul class="nav nav-pills flex-column mb-auto">
+                    <li class="nav-item">
+                        <a href="/admin" class="nav-link">
+                            <i class="bi bi-grid-fill"></i>
+                            <span>Панель управления</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admin/modules" class="nav-link">
+                            <i class="bi bi-tags-fill"></i>
+                            <span>Модули</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admin/templates" class="nav-link">
+                            <i class="bi bi-chat-left-quote-fill"></i>
+                            <span>Шаблоны ответов</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="/admin/smart-faq" class="nav-link active">
+                            <i class="bi bi-lightning-charge-fill"></i>
+                            <span>Smart FAQ</span>
+                        </a>
+                    </li>
+                    <li class="nav-item mt-2">
+                        <a href="/admin/reports/export.xlsx" class="nav-link text-success">
+                            <i class="bi bi-file-earmark-excel-fill"></i>
+                            <span>Выгрузить Excel</span>
+                        </a>
+                    </li>
+                </ul>
             </div>
-            <a href="/admin"><i class="bi bi-grid-fill me-2"></i> Панель управления</a>
-            <a href="/admin"><i class="bi bi-card-list me-2"></i> Все заявки</a>
-            <a href="/admin/modules"><i class="bi bi-tags-fill me-2"></i> Модули</a>
-            <a href="/admin/templates"><i class="bi bi-chat-left-quote-fill me-2"></i> Шаблоны ответов</a>
-            <a href="/admin/smart-faq" class="active"><i class="bi bi-lightning-charge-fill me-2"></i> Smart FAQ</a>
-            <div class="mt-5 pt-5 text-center">
-                <div class="small text-muted mb-2">Админ: <strong>{{ admin_username }}</strong></div>
+
+            <div class="pt-4 border-top border-secondary border-opacity-25 text-center">
+                <div class="small text-muted mb-2">Вы вошли как:<br><span class="text-white fw-semibold">{{ admin_username }}</span></div>
                 <form method="POST" action="/admin/logout">
-                    <button type="submit" class="btn btn-sm btn-danger w-100">Выйти</button>
+                    <button type="submit" class="btn btn-danger btn-sm w-100">Выйти</button>
                 </form>
             </div>
         </div>
-        <div class="col-md-10 p-4">
-            <h3 class="fw-bold mb-4">Smart FAQ (Автоответы по ключевым словам)</h3>
+
+        <!-- Основной контент -->
+        <div class="col min-vh-100 p-4">
+            <h3 class="fw-bold mb-1">Smart FAQ (Автоответы по ключевым словам)</h3>
+            <p class="text-muted mb-4">Правила мгновенных подсказок студенту до отправки заявки.</p>
+
             <div class="row g-4">
                 <div class="col-lg-8">
-                    <div class="card p-4">
+                    <div class="card p-4 bg-white">
                         <h5 class="fw-bold mb-3">Активные правила автоответов</h5>
                         {% if rules %}
                             {% for rule in rules %}
@@ -61,24 +110,28 @@
                             </div>
                             {% endfor %}
                         {% else %}
-                            <p class="text-muted">Правил автоответов пока нет. Создайте первое правило справа.</p>
+                            <div class="text-center text-muted py-5">
+                                <i class="bi bi-lightning-charge fs-1 d-block mb-2"></i>
+                                Правил автоответов пока нет. Создайте первое правило справа.
+                            </div>
                         {% endif %}
                     </div>
                 </div>
+
                 <div class="col-lg-4">
-                    <div class="card p-4">
+                    <div class="card p-4 bg-white">
                         <h5 class="fw-bold mb-3">➕ Новое автоправило</h5>
                         <form method="POST" action="/admin/smart-faq/add">
                             <div class="mb-3">
-                                <label class="form-label">Название правила:</label>
+                                <label class="form-label small text-muted fw-bold">Название правила:</label>
                                 <input type="text" name="title" class="form-control" placeholder="например: Справка eGov" required>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Ключевые слова (через запятую):</label>
+                                <label class="form-label small text-muted fw-bold">Ключевые слова (через запятую):</label>
                                 <input type="text" name="keywords" class="form-control" placeholder="справка, егов, egov, справку" required>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Текст подсказки студенту:</label>
+                                <label class="form-label small text-muted fw-bold">Текст подсказки студенту:</label>
                                 <textarea name="reply_text" class="form-control" rows="4" placeholder="Справку с места учебы можно получить..." required></textarea>
                             </div>
                             <button type="submit" class="btn btn-primary w-100">Создать правило</button>

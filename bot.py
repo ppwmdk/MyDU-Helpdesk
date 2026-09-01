@@ -1492,7 +1492,7 @@ async def admin_templates_page(request: Request):
             await cursor.execute("SELECT id, title, text, created_at FROM quick_templates ORDER BY id ASC")
             templates_list = await cursor.fetchall()
     return templates.TemplateResponse(request, "templates.html", {
-        "request": request, "admin_username": admin_username, "templates": templates_list,
+        "request": request, "admin_username": admin_username, "quick_templates_list": templates_list,
         "active_page": "templates", "message": request.query_params.get("message")
     })
 
