@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Шаблоны ответов — Astana IT Helpdesk</title>
+    <title>Панель управления — Astana IT Helpdesk</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
@@ -13,7 +13,13 @@
             --main-bg: #f8fafc;
         }
         body { background-color: var(--main-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .sidebar { background-color: var(--sidebar-bg); min-height: 100vh; color: #94a3b8; }
+        .sidebar { 
+            background-color: var(--sidebar-bg); 
+            height: 100vh; 
+            position: sticky; 
+            top: 0; 
+            color: #94a3b8; 
+        }
         .sidebar .nav-link {
             color: #94a3b8; font-weight: 500; padding: 10px 16px; border-radius: 8px; margin-bottom: 6px;
             transition: all 0.2s ease; display: flex; align-items: center; text-decoration: none;
@@ -24,13 +30,14 @@
         .brand-header { padding: 24px 16px 20px 16px; text-align: center; }
         .brand-title { color: #ffffff; font-weight: 800; letter-spacing: 0.5px; margin-bottom: 2px; font-size: 1.05rem; }
         .brand-subtitle { color: #38bdf8; font-weight: 700; letter-spacing: 1.5px; font-size: 0.75rem; }
-        .card { border: none; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .card-stat { border: none; border-radius: 12px; transition: transform 0.2s; }
+        .card-stat:hover { transform: translateY(-2px); }
     </style>
 </head>
 <body>
 <div class="container-fluid p-0">
     <div class="row g-0">
-        <!-- Боковая панель -->
+        <!-- Фиксированная боковая панель -->
         <div class="col-auto col-md-3 col-lg-2 sidebar d-flex flex-column justify-content-between p-3">
             <div>
                 <div class="brand-header border-bottom border-secondary border-opacity-25 mb-4">
@@ -40,7 +47,7 @@
 
                 <ul class="nav nav-pills flex-column mb-auto">
                     <li class="nav-item">
-                        <a href="/admin" class="nav-link">
+                        <a href="/admin" class="nav-link active">
                             <i class="bi bi-grid-fill"></i>
                             <span>Панель управления</span>
                         </a>
@@ -52,7 +59,7 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a href="/admin/templates" class="nav-link active">
+                        <a href="/admin/templates" class="nav-link">
                             <i class="bi bi-chat-left-quote-fill"></i>
                             <span>Шаблоны ответов</span>
                         </a>
@@ -72,7 +79,7 @@
                 </ul>
             </div>
 
-            <div class="pt-4 border-top border-secondary border-opacity-25 text-center">
+            <div class="pt-3 border-top border-secondary border-opacity-25 text-center">
                 <div class="small text-muted mb-2">Вы вошли как:<br><span class="text-white fw-semibold">{{ admin_username }}</span></div>
                 <form method="POST" action="/admin/logout">
                     <button type="submit" class="btn btn-danger btn-sm w-100">Выйти</button>
@@ -82,49 +89,138 @@
 
         <!-- Основной контент -->
         <div class="col min-vh-100 p-4">
-            <h3 class="fw-bold mb-1">Шаблоны быстрых ответов</h3>
-            <p class="text-muted mb-4">Создавайте заготовки сообщений, которые можно в один клик вставлять при ответе студентам.</p>
+            <h3 class="fw-bold mb-1">Общая панель управления</h3>
+            <p class="text-muted mb-4">Статистика и оперативная обработка всех тикетов в одном окне.</p>
 
-            <div class="row g-4">
-                <div class="col-lg-8">
-                    <div class="card p-4 bg-white">
-                        <h5 class="fw-bold mb-3">Сохраненные шаблоны</h5>
-                        {% if quick_templates_list and quick_templates_list|length > 0 %}
-                            {% for tpl in quick_templates_list %}
-                            <div class="border rounded-3 p-3 mb-3 bg-light">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                    <h6 class="fw-bold mb-0 text-primary">{{ tpl.title }}</h6>
-                                    <form method="POST" action="/admin/templates/{{ tpl.id }}/delete" onsubmit="return confirm('Удалить шаблон?');">
-                                        <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                                    </form>
-                                </div>
-                                <div class="small text-muted text-break">{{ tpl.text }}</div>
+            <!-- Статистика -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="card card-stat shadow-sm p-3 bg-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted fw-bold text-uppercase" style="font-size: 0.75rem;">Всего тикетов</small>
+                                <h3 class="fw-bold mb-0 mt-1">{{ counts.total }}</h3>
                             </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="text-center text-muted py-5">
-                                <i class="bi bi-chat-square-quote fs-1 d-block mb-2"></i>
-                                Шаблонов пока нет. Создайте первый шаблон справа.
-                            </div>
-                        {% endif %}
+                            <div class="p-3 bg-primary bg-opacity-10 text-primary rounded-3"><i class="bi bi-folder2-open fs-4"></i></div>
+                        </div>
                     </div>
                 </div>
-
-                <div class="col-lg-4">
-                    <div class="card p-4 bg-white">
-                        <h5 class="fw-bold mb-3">➕ Новый шаблон</h5>
-                        <form method="POST" action="/admin/templates/add">
-                            <div class="mb-3">
-                                <label class="form-label small text-muted fw-bold">Название шаблона:</label>
-                                <input type="text" name="title" class="form-control" placeholder="например: Оплата Kaspi" required>
+                <div class="col-md-3">
+                    <div class="card card-stat shadow-sm p-3 bg-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-danger fw-bold text-uppercase" style="font-size: 0.75rem;">Новые ошибки</small>
+                                <h3 class="fw-bold mb-0 mt-1 text-danger">{{ counts.new_count }}</h3>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label small text-muted fw-bold">Текст ответа студенту:</label>
-                                <textarea name="text" class="form-control" rows="5" placeholder="Здравствуйте! Оплату можно произвести..." required></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">Сохранить шаблон</button>
-                        </form>
+                            <div class="p-3 bg-danger bg-opacity-10 text-danger rounded-3"><i class="bi bi-bell fs-4"></i></div>
+                        </div>
                     </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-stat shadow-sm p-3 bg-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-warning fw-bold text-uppercase" style="font-size: 0.75rem;">В процессе</small>
+                                <h3 class="fw-bold mb-0 mt-1 text-warning">{{ counts.in_progress_count }}</h3>
+                            </div>
+                            <div class="p-3 bg-warning bg-opacity-10 text-warning rounded-3"><i class="bi bi-cone-striped fs-4"></i></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-stat shadow-sm p-3 bg-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-success fw-bold text-uppercase" style="font-size: 0.75rem;">Закрытые (Решено)</small>
+                                <h3 class="fw-bold mb-0 mt-1 text-success">{{ counts.resolved_count }}</h3>
+                            </div>
+                            <div class="p-3 bg-success bg-opacity-10 text-success rounded-3"><i class="bi bi-shield-check fs-4"></i></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Фильтры и поиск -->
+            <div class="card shadow-sm border-0 p-3 mb-4 bg-white rounded-3">
+                <form method="GET" action="/admin" class="row g-2 align-items-center">
+                    <div class="col-md-5">
+                        <div class="input-group">
+                            <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                            <input type="text" name="q" class="form-control border-start-0" placeholder="Поиск студента, группы, описания..." value="{{ query }}">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <select name="status" class="form-select">
+                            <option value="">Все статусы</option>
+                            {% for st in statuses %}
+                            <option value="{{ st }}" {% if selected_status == st %}selected{% endif %}>{{ st }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <select name="module" class="form-select">
+                            <option value="">Все модули</option>
+                            {% for mod in modules %}
+                            <option value="{{ mod }}" {% if selected_module == mod %}selected{% endif %}>{{ mod }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-1">
+                        <button type="submit" class="btn btn-primary w-100">Найти</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Таблица заявок -->
+            <div class="card shadow-sm border-0 bg-white rounded-3 overflow-hidden">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 70px;">ID</th>
+                                <th>Студент / Группа</th>
+                                <th>Модуль</th>
+                                <th>Описание неисправности</th>
+                                <th>Статус</th>
+                                <th class="text-end">Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if reports %}
+                                {% for r in reports %}
+                                <tr>
+                                    <td class="fw-bold text-muted">#{{ r.id }}</td>
+                                    <td>
+                                        <div class="fw-semibold">{{ r.name }}</div>
+                                        <small class="text-muted"><i class="bi bi-people me-1"></i>{{ r.group_name }}</small>
+                                        <div class="text-muted" style="font-size: 0.75rem;"><i class="bi bi-clock me-1"></i>{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at and r.created_at.strftime else r.created_at }}</div>
+                                    </td>
+                                    <td><span class="badge bg-light text-dark border">{{ r.module }}</span></td>
+                                    <td style="max-width: 320px;" class="text-truncate">{{ r.description }}</td>
+                                    <td>
+                                        {% if r.status == 'Новая' %}
+                                        <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">Новая</span>
+                                        {% elif r.status == 'В работе' %}
+                                        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle px-2 py-1">В работе</span>
+                                        {% else %}
+                                        <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">Решено</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <a href="/admin/reports/{{ r.id }}" class="btn btn-sm btn-outline-primary px-3">Открыть</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-5">
+                                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                                        Заявок не найдено
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
