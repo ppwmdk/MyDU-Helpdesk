@@ -8,15 +8,11 @@ from typing import List, Optional
 import psycopg
 from psycopg.rows import dict_row
 import openpyxl
-
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла
-load_dotenv()
+from fastapi import FastAPI, Request, Form, HTTPException, status
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
+from fastapi.templating import Jinja2Templates
 
 from telegram import (
     Update,
@@ -39,12 +35,18 @@ from telegram.ext import (
 
 from locales import t
 
+# --- ЗАГРУЗКА ОКРУЖЕНИЯ ---
+load_dotenv()
+
 # --- ЛОГИРОВАНИЕ ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("HelpdeskApp")
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 ADMIN_LOGIN = os.getenv("ADMIN_PANEL_USERNAME", "admin")
@@ -52,29 +54,36 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PANEL_PASSWORD", "admin123")
 
 MEDIA_BASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guides_media")
 
-# --- БАЗА ДАННЫХ ---
+# --- СОСТОЯНИЯ ДЛЯ CONVERSATION HANDLER (ПОДАЧА ЗАЯВКИ) ---
+FIO, GROUP, MODULE, DESC, SCREENSHOT = range(5)
+
+# Глобальный объект Telegram-приложения
+tg_app: Optional[Application] = None
+
+
+# =====================================================================
+#                          РАБОТА С БАЗОЙ ДАННЫХ
+# =====================================================================
+
 async def get_conn_async():
     if DATABASE_URL:
-        # Прямое подключение по строке DATABASE_URL из .env
         return await psycopg.AsyncConnection.connect(
             DATABASE_URL,
             row_factory=dict_row
         )
-    else:
-        # Резервный вариант, если DATABASE_URL не задан
-        return await psycopg.AsyncConnection.connect(
-            host=os.getenv("DB_HOST", "localhost"),
-            port=int(os.getenv("DB_PORT", 5432)),
-            dbname=os.getenv("DB_NAME", "mydu_helpdesk"),
-            user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASS", ""),
-            row_factory=dict_row
-        )
+    return await psycopg.AsyncConnection.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", 5432)),
+        dbname=os.getenv("DB_NAME", "mydu_helpdesk"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASS", ""),
+        row_factory=dict_row
+    )
 
 async def init_db():
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
-            # Пользователи бота и язык
+            # Пользователи бота
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bot_users (
                     user_id BIGINT PRIMARY KEY,
@@ -99,7 +108,7 @@ async def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            # Чат по заявкам
+            # Сообщения в чате тикета
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS report_messages (
                     id SERIAL PRIMARY KEY,
@@ -110,7 +119,7 @@ async def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            # Модули
+            # Модули (категории)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS system_modules (
                     id SERIAL PRIMARY KEY,
@@ -127,7 +136,7 @@ async def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            # Smart FAQ
+            # Smart FAQ правила
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS smart_faq_rules (
                     id SERIAL PRIMARY KEY,
@@ -147,12 +156,12 @@ async def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            
-            # Дефолтные модули если пусто
+
+            # Базовые модули, если таблица пустая
             await cursor.execute("SELECT COUNT(*) as cnt FROM system_modules;")
             res = await cursor.fetchone()
             if res["cnt"] == 0:
-                default_modules = [
+                defaults = [
                     "Регистрация на дисциплины",
                     "Общежитие",
                     "Корпоративная почта / Office 365",
@@ -160,10 +169,14 @@ async def init_db():
                     "Справки и документы",
                     "Другое"
                 ]
-                for dm in default_modules:
-                    await cursor.execute("INSERT INTO system_modules (name) VALUES (%s) ON CONFLICT DO NOTHING;", (dm,))
+                for d in defaults:
+                    await cursor.execute("INSERT INTO system_modules (name) VALUES (%s) ON CONFLICT DO NOTHING;", (d,))
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ЯЗЫКА ---
+
+# =====================================================================
+#                     ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ БОТА
+# =====================================================================
+
 async def get_user_lang(user_id: int) -> str:
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
@@ -204,6 +217,7 @@ def get_lang_inline_keyboard() -> InlineKeyboardMarkup:
         ]
     ])
 
+
 # =====================================================================
 #                     TELEGRAM BOT HANDLERS
 # =====================================================================
@@ -212,7 +226,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user:
         return
-    # Спрашиваем язык при первом старте или смене
     await update.message.reply_text(
         t("ru", "choose_lang"),
         reply_markup=get_lang_inline_keyboard()
@@ -277,7 +290,11 @@ async def report_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     kb = [[KeyboardButton(m["name"])] for m in mods]
     kb.append([KeyboardButton(t(lang, "btn_cancel"))])
-    await update.message.reply_text(t(lang, "choose_module"), parse_mode="HTML", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text(
+        t(lang, "choose_module"),
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
     return MODULE
 
 async def report_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -301,7 +318,7 @@ async def report_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["desc"] = text
 
-    # Smart FAQ проверка по ключевым словам
+    # Проверка Smart FAQ
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT title, keywords, reply_text FROM smart_faq_rules WHERE is_active = TRUE;")
@@ -325,7 +342,11 @@ async def report_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton(t(lang, "btn_skip"))],
         [KeyboardButton(t(lang, "btn_cancel"))]
     ]
-    await update.message.reply_text(t(lang, "send_screen"), parse_mode="HTML", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await update.message.reply_text(
+        t(lang, "send_screen"),
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
+    )
     return SCREENSHOT
 
 async def report_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -362,7 +383,7 @@ async def report_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- БАЗА ЗНАНИЙ И ОБЩЕЖИТИЕ (8 ФОТО ПО ПОРЯДКУ) ---
+# --- БАЗА ЗНАНИЙ И ИНСТРУКЦИЯ ПО ОБЩЕЖИТИЮ (8 ФОТО ПО ПОРЯДКУ) ---
 async def guides_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
@@ -391,10 +412,9 @@ async def guides_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await get_user_lang(user_id)
     data = query.data
 
-    # Отправка альбома общежития (8 фото строго по порядку)
+    # Отправка альбома общежития (1.jpg - 8.jpg)
     if data == "guide:dorm":
         folder = os.path.join(MEDIA_BASE_PATH, "dorm", lang)
-        # Если папка для этого языка пуста или отсутствует, берем русскую версию
         if not os.path.exists(folder) or not os.listdir(folder):
             folder = os.path.join(MEDIA_BASE_PATH, "dorm", "ru")
 
@@ -402,7 +422,6 @@ async def guides_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(t(lang, "guides_empty"))
             return
 
-        # Сортируем строго 1.jpg, 2.jpg ... 8.jpg
         files = [f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
         files.sort(key=lambda x: int(os.path.splitext(x)[0]) if os.path.splitext(x)[0].isdigit() else 999)
 
@@ -489,14 +508,13 @@ async def my_reports_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text, parse_mode="HTML")
 
-# --- СТУДЕНТ ОТВЕЧАЕТ НА СООБЩЕНИЕ В ЧАТЕ (REPLY) ---
+# --- ОТВЕТ СТУДЕНТА В ЧАТЕ (REPLY) ---
 async def student_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     msg = update.message
     if not msg.reply_to_message:
         return
 
-    # Извлекаем номер тикета из цитируемого сообщения бота
     orig_text = msg.reply_to_message.text or msg.reply_to_message.caption or ""
     import re
     match = re.search(r"#(\d+)", orig_text)
@@ -512,7 +530,8 @@ async def student_reply_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 VALUES (%s, 'student', %s, %s);
             """, (report_id, user.first_name or "Student", msg.text))
 
-    await msg.reply_text("✅ Ваше сообщение добавлено в заявку.")
+    await msg.reply_text("✅ Сообщение отправлено в техподдержку.")
+
 
 # =====================================================================
 #                     FASTAPI WEB PANEL
@@ -530,7 +549,6 @@ def admin_redirect():
 @app.on_event("startup")
 async def on_startup():
     await init_db()
-    # Запуск Telegram Polling
     global tg_app
     tg_app = Application.builder().token(BOT_TOKEN).build()
 
@@ -574,7 +592,7 @@ async def on_shutdown():
         await tg_app.stop()
         await tg_app.shutdown()
 
-# --- АВТОРИЗАЦИЯ В ПАНЕЛИ ---
+# --- АВТОРИЗАЦИЯ ---
 @app.get("/admin/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html", {"request": request})
@@ -602,7 +620,6 @@ async def dashboard(request: Request, q: Optional[str] = None, status: Optional[
 
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
-            # Статистика
             await cursor.execute("""
                 SELECT 
                     COUNT(*) as total,
@@ -613,7 +630,6 @@ async def dashboard(request: Request, q: Optional[str] = None, status: Optional[
             """)
             counts = await cursor.fetchone()
 
-            # Фильтрация
             sql = "SELECT * FROM reports WHERE 1=1"
             params = []
             if q:
@@ -627,11 +643,10 @@ async def dashboard(request: Request, q: Optional[str] = None, status: Optional[
                 sql += " AND module = %s"
                 params.append(module)
 
-            sql += " ORDER BY id DESC LIMIT 100;"
+            sql += " ORDER BY id DESC LIMIT 150;"
             await cursor.execute(sql, tuple(params))
             reports = await cursor.fetchall()
 
-            # Список активных модулей для фильтра
             await cursor.execute("SELECT name FROM system_modules ORDER BY name;")
             mods = [m["name"] for m in await cursor.fetchall()]
 
@@ -648,7 +663,7 @@ async def dashboard(request: Request, q: Optional[str] = None, status: Optional[
         "active_page": "dashboard"
     })
 
-# --- МАССОВОЕ ДЕЙСТВИЕ НАД ТИКЕТАМИ ЧЕРЕЗ ЧЕКБОКСЫ ---
+# --- МАССОВЫЕ ДЕЙСТВИЯ (ЧЕКБОКСЫ) ---
 @app.post("/admin/reports/bulk-action")
 async def bulk_action(
     request: Request,
@@ -677,7 +692,6 @@ async def bulk_action(
                         VALUES (%s, 'staff', %s, %s);
                     """, (t_rec["id"], admin, notify_text.strip()))
 
-    # Уведомляем студентов на их родном языке
     for t_rec in targets:
         uid = t_rec.get("user_id")
         if uid:
@@ -692,7 +706,7 @@ async def bulk_action(
 
     return RedirectResponse(url="/admin?message=bulk_success", status_code=303)
 
-# --- КАРТОЧКА ЗАЯВКИ И LIVE ЧАТ ---
+# --- КАРТОЧКА ТИКЕТА И LIVE ЧАТ ---
 @app.get("/admin/reports/{report_id}", response_class=HTMLResponse)
 async def report_detail(request: Request, report_id: int):
     admin = get_admin_username(request)
@@ -813,7 +827,7 @@ async def get_screenshot(report_id: int):
     stream.seek(0)
     return Response(content=stream.read(), media_type="image/jpeg")
 
-# --- ВЫГРУЗКА В EXCEL ---
+# --- ЭКСПОРТ В EXCEL ---
 @app.get("/admin/reports/export.xlsx")
 async def export_excel(request: Request):
     if not get_admin_username(request):
