@@ -9,6 +9,7 @@ import psycopg
 from psycopg.rows import dict_row
 import openpyxl
 from dotenv import load_dotenv
+from telegram.request import HTTPXRequest
 
 from fastapi import FastAPI, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
@@ -550,7 +551,17 @@ def admin_redirect():
 async def on_startup():
     await init_db()
     global tg_app
-    tg_app = Application.builder().token(BOT_TOKEN).build()
+
+    # Настройка повышенных таймаутов для стабильной отправки тяжелых медиа и PDF
+    request_config = HTTPXRequest(
+        connection_pool_size=16,
+        connect_timeout=30.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=30.0
+    )
+
+    tg_app = Application.builder().token(BOT_TOKEN).request(request_config).build()
 
     conv = ConversationHandler(
         entry_points=[
@@ -581,7 +592,13 @@ async def on_startup():
 
     await tg_app.initialize()
     await tg_app.start()
-    await tg_app.updater.start_polling(drop_pending_updates=True)
+    await tg_app.updater.start_polling(
+    drop_pending_updates=True,
+    read_timeout=30,
+    write_timeout=30,
+    connect_timeout=30,
+    pool_timeout=30
+    )
     logger.info("Bot application and Polling successfully started.")
 
 @app.on_event("shutdown")
