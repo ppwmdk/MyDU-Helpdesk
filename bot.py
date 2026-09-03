@@ -592,14 +592,7 @@ async def on_startup():
 
     await tg_app.initialize()
     await tg_app.start()
-    await tg_app.updater.start_polling(
-    drop_pending_updates=True,
-    read_timeout=30,
-    write_timeout=30,
-    connect_timeout=30,
-    pool_timeout=30
-    )
-    logger.info("Bot application and Polling successfully started.")
+    await tg_app.updater.start_polling(drop_pending_updates=True)
 
 @app.on_event("shutdown")
 async def on_shutdown():
