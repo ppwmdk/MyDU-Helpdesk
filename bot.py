@@ -9,7 +9,6 @@ import psycopg
 from psycopg.rows import dict_row
 import openpyxl
 from dotenv import load_dotenv
-from telegram.request import HTTPXRequest
 
 from fastapi import FastAPI, Request, Form, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
@@ -24,6 +23,7 @@ from telegram import (
     ReplyKeyboardRemove,
     InputMediaPhoto
 )
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -36,10 +36,10 @@ from telegram.ext import (
 
 from locales import t
 
-# --- ЗАГРУЗКА ОКРУЖЕНИЯ ---
+# --- ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ---
 load_dotenv()
 
-# --- ЛОГИРОВАНИЕ ---
+# --- НАСТРОЙКА ЛОГИРОВАНИЯ ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -55,10 +55,13 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PANEL_PASSWORD", "admin123")
 
 MEDIA_BASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guides_media")
 
-# --- СОСТОЯНИЯ ДЛЯ CONVERSATION HANDLER (ПОДАЧА ЗАЯВКИ) ---
+# --- СОСТОЯНИЯ ДИАЛОГА ПОДАЧИ ЗАЯВКИ (FSM) ---
 FIO, GROUP, MODULE, DESC, SCREENSHOT = range(5)
 
-# Глобальный объект Telegram-приложения
+# --- IN-MEMORY КЭШ ДЛЯ МГНОВЕННОЙ ОТПРАВКИ МЕДИА ---
+MEDIA_CACHE = {}
+
+# Глобальный объект Telegram Application
 tg_app: Optional[Application] = None
 
 
@@ -84,7 +87,7 @@ async def get_conn_async():
 async def init_db():
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
-            # Пользователи бота
+            # Пользователи бота и их язык
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bot_users (
                     user_id BIGINT PRIMARY KEY,
@@ -109,7 +112,7 @@ async def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            # Сообщения в чате тикета
+            # Сообщения диалога заявки (Live-чат)
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS report_messages (
                     id SERIAL PRIMARY KEY,
@@ -128,7 +131,7 @@ async def init_db():
                     is_active BOOLEAN DEFAULT TRUE
                 );
             """)
-            # Быстрые шаблоны ответов
+            # Шаблоны быстрых ответов
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS quick_templates (
                     id SERIAL PRIMARY KEY,
@@ -147,7 +150,7 @@ async def init_db():
                     is_active BOOLEAN DEFAULT TRUE
                 );
             """)
-            # Инструкции
+            # Текстовые инструкции
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS module_guides (
                     id SERIAL PRIMARY KEY,
@@ -158,7 +161,7 @@ async def init_db():
                 );
             """)
 
-            # Базовые модули, если таблица пустая
+            # Наполнение базовыми модулями при первом старте
             await cursor.execute("SELECT COUNT(*) as cnt FROM system_modules;")
             res = await cursor.fetchone()
             if res["cnt"] == 0:
@@ -253,7 +256,7 @@ async def change_lang_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_lang_inline_keyboard()
     )
 
-# --- FSM ПОДАЧИ ЗАЯВКИ ---
+# --- ПОШАГОВАЯ ПОДАЧА ЗАЯВКИ (FSM) ---
 async def report_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lang = await get_user_lang(user.id)
@@ -319,7 +322,7 @@ async def report_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["desc"] = text
 
-    # Проверка Smart FAQ
+    # Автоматическая подсказка через Smart FAQ
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute("SELECT title, keywords, reply_text FROM smart_faq_rules WHERE is_active = TRUE;")
@@ -384,7 +387,7 @@ async def report_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- БАЗА ЗНАНИЙ И ИНСТРУКЦИЯ ПО ОБЩЕЖИТИЮ (8 ФОТО ПО ПОРЯДКУ) ---
+# --- БАЗА ЗНАНИЙ И ИНСТРУКЦИИ С КЭШИРОВАНИЕМ ---
 async def guides_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
@@ -397,6 +400,11 @@ async def guides_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = [
         [InlineKeyboardButton(t(lang, "dorm_guide_btn"), callback_data="guide:dorm")]
     ]
+    # Если в locales определена кнопка регистрации, добавляем её
+    reg_btn_text = t(lang, "reg_guide_btn")
+    if reg_btn_text != "reg_guide_btn":
+        buttons.append([InlineKeyboardButton(reg_btn_text, callback_data="guide:registration")])
+
     for m in mods:
         buttons.append([InlineKeyboardButton(f"📁 {m['module_name']}", callback_data=f"gmod:{m['module_name'][:30]}")])
 
@@ -413,16 +421,51 @@ async def guides_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = await get_user_lang(user_id)
     data = query.data
 
-    # Отправка альбома общежития (1.jpg - 8.jpg)
-    if data == "guide:dorm":
-        folder = os.path.join(MEDIA_BASE_PATH, "dorm", lang)
+    # --- ОТПРАВКА МЕДИА-ИНСТРУКЦИЙ (БЫСТРАЯ ОТПРАВКА С КЭШИРОВАНИЕМ) ---
+    if data.startswith("guide:"):
+        guide_type = data.split(":")[1]
+        cache_key = f"{guide_type}:{lang}"
+
+        caption_key = "dorm_caption" if guide_type == "dorm" else "reg_caption"
+        caption_text = t(lang, caption_key)
+        if caption_text == caption_key:
+            caption_text = t(lang, "dorm_caption")
+
+        # 1. Если уже кэшировано в Telegram -> отправляем мгновенно по file_id
+        if cache_key in MEDIA_CACHE:
+            media_list = []
+            for i, fid in enumerate(MEDIA_CACHE[cache_key]):
+                c = caption_text if i == 0 else None
+                media_list.append(InputMediaPhoto(media=fid, caption=c, parse_mode="HTML"))
+            await context.bot.send_media_group(chat_id=user_id, media=media_list)
+            return
+
+        # 2. Иначе ищем на сервере в папках
+        folder = os.path.join(MEDIA_BASE_PATH, guide_type, lang)
         if not os.path.exists(folder) or not os.listdir(folder):
-            folder = os.path.join(MEDIA_BASE_PATH, "dorm", "ru")
+            folder = os.path.join(MEDIA_BASE_PATH, guide_type, "ru")
 
         if not os.path.exists(folder):
             await query.message.reply_text(t(lang, "guides_empty"))
             return
 
+        # Проверка PDF файла
+        pdf_files = [f for f in os.listdir(folder) if f.lower().endswith(".pdf")]
+        if pdf_files:
+            pdf_path = os.path.join(folder, pdf_files[0])
+            pdf_cap = t(lang, "pdf_caption")
+            if pdf_cap == "pdf_caption":
+                pdf_cap = "📄 Инструкция (PDF)"
+            with open(pdf_path, "rb") as doc:
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=doc,
+                    caption=pdf_cap,
+                    parse_mode="HTML"
+                )
+            return
+
+        # Поиск картинок
         files = [f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png"))]
         files.sort(key=lambda x: int(os.path.splitext(x)[0]) if os.path.splitext(x)[0].isdigit() else 999)
 
@@ -431,18 +474,19 @@ async def guides_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         media_list = []
-        for i, fname in enumerate(files[:8]):
+        for i, fname in enumerate(files[:10]):
             path = os.path.join(folder, fname)
             with open(path, "rb") as f:
                 photo_bytes = f.read()
-            caption = t(lang, "dorm_caption") if i == 0 else None
-            media_list.append(InputMediaPhoto(media=photo_bytes, caption=caption, parse_mode="HTML"))
+            c = caption_text if i == 0 else None
+            media_list.append(InputMediaPhoto(media=photo_bytes, caption=c, parse_mode="HTML"))
 
-        await query.message.reply_text("⏳ Жүктелуде... / Отправляем страницы инструкции...")
-        await context.bot.send_media_group(chat_id=user_id, media=media_list)
+        # Первичная отправка и сохранение file_id в кэш
+        sent_messages = await context.bot.send_media_group(chat_id=user_id, media=media_list)
+        MEDIA_CACHE[cache_key] = [msg.photo[-1].file_id for msg in sent_messages if msg.photo]
         return
 
-    # Динамические гайды
+    # Динамические гайды из БД
     if data.startswith("gmod:"):
         mod_name = data.split(":", 1)[1]
         async with await get_conn_async() as conn:
@@ -480,6 +524,10 @@ async def guides_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mods = await cursor.fetchall()
 
         buttons = [[InlineKeyboardButton(t(lang, "dorm_guide_btn"), callback_data="guide:dorm")]]
+        reg_btn_text = t(lang, "reg_guide_btn")
+        if reg_btn_text != "reg_guide_btn":
+            buttons.append([InlineKeyboardButton(reg_btn_text, callback_data="guide:registration")])
+
         for m in mods:
             buttons.append([InlineKeyboardButton(f"📁 {m['module_name']}", callback_data=f"gmod:{m['module_name'][:30]}")])
 
@@ -552,7 +600,7 @@ async def on_startup():
     await init_db()
     global tg_app
 
-    # Настройка повышенных таймаутов для стабильной отправки тяжелых медиа и PDF
+    # Настройка высоких таймаутов HTTPX для надежной связи без обрывов
     request_config = HTTPXRequest(
         connection_pool_size=16,
         connect_timeout=30.0,
@@ -560,7 +608,6 @@ async def on_startup():
         write_timeout=60.0,
         pool_timeout=30.0
     )
-
     tg_app = Application.builder().token(BOT_TOKEN).request(request_config).build()
 
     conv = ConversationHandler(
@@ -593,6 +640,7 @@ async def on_startup():
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
+    logger.info("Bot application and Polling successfully started.")
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -602,7 +650,7 @@ async def on_shutdown():
         await tg_app.stop()
         await tg_app.shutdown()
 
-# --- АВТОРИЗАЦИЯ ---
+# --- АВТОРИЗАЦИЯ ПАНЕЛИ ---
 @app.get("/admin/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html", {"request": request})
@@ -716,7 +764,7 @@ async def bulk_action(
 
     return RedirectResponse(url="/admin?message=bulk_success", status_code=303)
 
-# --- КАРТОЧКА ТИКЕТА И LIVE ЧАТ ---
+# --- ДЕТАЛИ ЗАЯВКИ И LIVE-ЧАТ ---
 @app.get("/admin/reports/{report_id}", response_class=HTMLResponse)
 async def report_detail(request: Request, report_id: int):
     admin = get_admin_username(request)
@@ -992,7 +1040,7 @@ async def delete_smart_faq(request: Request, rule_id: int):
             await cursor.execute("DELETE FROM smart_faq_rules WHERE id = %s;", (rule_id,))
     return RedirectResponse(url="/admin/smart-faq", status_code=303)
 
-# --- ИНСТРУКЦИИ (ГАЙДЫ) ---
+# --- УПРАВЛЕНИЕ ИНСТРУКЦИЯМИ (ГАЙДЫ) ---
 @app.get("/admin/guides", response_class=HTMLResponse)
 async def guides_page(request: Request):
     admin = get_admin_username(request)
