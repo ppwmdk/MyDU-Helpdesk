@@ -44,31 +44,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("HelpdeskApp")
 
 # --- КОНФИГУРАЦИЯ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", 5432))
-DB_NAME = os.getenv("DB_NAME", "mydu_helpdesk")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("DB_PASS") or os.getenv("DB_PASSWORD", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-ADMIN_LOGIN = os.getenv("ADMIN_LOGIN", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+ADMIN_LOGIN = os.getenv("ADMIN_PANEL_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PANEL_PASSWORD", "admin123")
 
 MEDIA_BASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guides_media")
 
-# --- СОСТОЯНИЯ ДЛЯ CONVERSATION HANDLER ---
-FIO, GROUP, MODULE, DESC, SCREENSHOT = range(5)
-
 # --- БАЗА ДАННЫХ ---
 async def get_conn_async():
-    return await psycopg.AsyncConnection.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS,
-        row_factory=dict_row
-    )
+    if DATABASE_URL:
+        # Прямое подключение по строке DATABASE_URL из .env
+        return await psycopg.AsyncConnection.connect(
+            DATABASE_URL,
+            row_factory=dict_row
+        )
+    else:
+        # Резервный вариант, если DATABASE_URL не задан
+        return await psycopg.AsyncConnection.connect(
+            host=os.getenv("DB_HOST", "localhost"),
+            port=int(os.getenv("DB_PORT", 5432)),
+            dbname=os.getenv("DB_NAME", "mydu_helpdesk"),
+            user=os.getenv("DB_USER", "postgres"),
+            password=os.getenv("DB_PASS", ""),
+            row_factory=dict_row
+        )
 
 async def init_db():
     async with await get_conn_async() as conn:
