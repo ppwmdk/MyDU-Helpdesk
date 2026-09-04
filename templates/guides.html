@@ -1,9 +1,177 @@
-<div class="col-lg-5">
-            <div class="card card-custom p-4 shadow-sm border-0">
-                <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить инструкцию (3 языка)</h6>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>База знаний — Astana IT Helpdesk</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --sidebar-bg: #0c1322;
+            --sidebar-hover: #17233d;
+            --sidebar-active: #1d4ed8;
+        }
+        body {
+            background-color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .sidebar {
+            width: 250px;
+            background-color: var(--sidebar-bg);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            min-height: 100vh;
+            padding: 24px 14px;
+        }
+        .sidebar-brand {
+            font-size: 1.05rem;
+            font-weight: 800;
+            text-align: center;
+            padding-bottom: 24px;
+            margin-bottom: 20px;
+        }
+        .sidebar-brand small {
+            display: block;
+            font-size: 0.7rem;
+            color: #38bdf8;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-top: 3px;
+        }
+        .nav-link-custom {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            color: #94a3b8;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+            transition: all 0.15s ease-in-out;
+        }
+        .nav-link-custom:hover {
+            background-color: var(--sidebar-hover);
+            color: #f1f5f9;
+        }
+        .nav-link-custom.active {
+            background-color: var(--sidebar-active);
+            color: #fff;
+        }
+        .sidebar-footer {
+            margin-top: auto;
+            padding-top: 16px;
+        }
+        .admin-meta {
+            font-size: 0.65rem;
+            color: #475569;
+            word-break: break-all;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .content-area {
+            flex-grow: 1;
+            padding: 32px 40px;
+            overflow-x: hidden;
+        }
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .page-desc {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 28px;
+        }
+        .card-custom {
+            background: #fff;
+            border: 1px solid #edf2f7;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
+    </style>
+</head>
+<body>
+
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        ASTANA IT
+        <small>HELP-DESK</small>
+    </div>
+
+    <nav class="d-flex flex-column flex-grow-1">
+        <a href="/admin" class="nav-link-custom">
+            <i class="bi bi-grid-fill"></i> Панель управления
+        </a>
+        <a href="/admin/modules" class="nav-link-custom">
+            <i class="bi bi-tag-fill"></i> Модули
+        </a>
+        <a href="/admin/templates" class="nav-link-custom">
+            <i class="bi bi-chat-left-dots-fill"></i> Шаблоны ответов
+        </a>
+        <a href="/admin/smart-faq" class="nav-link-custom">
+            <i class="bi bi-lightning-charge-fill"></i> Smart FAQ
+        </a>
+        <a href="/admin/guides" class="nav-link-custom active">
+            <i class="bi bi-book-fill"></i> База знаний
+        </a>
+        <a href="/admin/reports/export.xlsx" class="nav-link-custom text-success">
+            <i class="bi bi-file-earmark-excel-fill"></i> Выгрузить Excel
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="admin-meta">Вы вошли как:<br>{{ admin_username }}</div>
+        <form action="/admin/logout" method="post" class="m-0">
+            <button class="btn btn-danger w-100 btn-sm py-1 fw-medium" style="background-color: #ef4444; border: none;">Выйти</button>
+        </form>
+    </div>
+</aside>
+
+<main class="content-area">
+    <div class="page-title">База знаний и инструкции</div>
+    <div class="page-desc">Текстовые памятки, которые отображаются в боте при нажатии на кнопку «📚 Инструкции и памятки».</div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card card-custom p-3">
+                <h6 class="fw-bold mb-3">Опубликованные памятки</h6>
+                {% if not guides %}
+                    <div class="text-muted small p-3 text-center">Инструкций пока нет. Добавьте первую памятку через форму справа.</div>
+                {% else %}
+                    <div class="list-group list-group-flush">
+                        {% for g in guides %}
+                        <div class="list-group-item d-flex justify-content-between align-items-start px-2 py-3">
+                            <div class="me-3">
+                                <span class="badge bg-light text-primary border mb-1">{{ g.module_name }}</span>
+                                <div class="fw-bold text-dark">{{ g.title }}</div>
+                                <div class="small text-muted mt-1" style="white-space: pre-line;">{{ g.content }}</div>
+                            </div>
+                            <form action="/admin/guides/{{ g.id }}/delete" method="post" onsubmit="return confirm('Удалить инструкцию?');">
+                                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card card-custom p-4">
+                <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить инструкцию (3 языка)</h6>
                 <form action="/admin/guides/add" method="post" enctype="multipart/form-data">
                     <div class="mb-3">
-                        <label class="form-label small text-muted fw-semibold">Модуль (раздел):</label>
+                        <label class="form-label small text-muted">Модуль (раздел):</label>
                         <select name="module_name" class="form-select" required>
                             {% for m in modules %}
                             <option value="{{ m }}">{{ m }}</option>
@@ -11,7 +179,7 @@
                         </select>
                     </div>
                     
-                    <hr class="my-3 text-muted opacity-25">
+                    <hr class="my-3">
 
                     <!-- РУССКИЙ -->
                     <div class="fw-bold text-primary small mb-2">🇷🇺 Русский язык</div>
@@ -22,11 +190,11 @@
                         <textarea name="content_ru" rows="2" class="form-control form-control-sm" placeholder="Текст на русском..."></textarea>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label text-muted" style="font-size: 0.75rem;">Файлы (RU):</label>
+                        <label class="form-label text-muted" style="font-size: 0.7rem;">Файлы (RU):</label>
                         <input type="file" name="media_ru" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
                     </div>
 
-                    <hr class="my-3 text-muted opacity-25">
+                    <hr class="my-3">
 
                     <!-- КАЗАХСКИЙ -->
                     <div class="fw-bold text-success small mb-2">🇰🇿 Қазақ тілі</div>
@@ -37,11 +205,11 @@
                         <textarea name="content_kz" rows="2" class="form-control form-control-sm" placeholder="Қазақша мәтін..."></textarea>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label text-muted" style="font-size: 0.75rem;">Файылдар (KZ):</label>
+                        <label class="form-label text-muted" style="font-size: 0.7rem;">Файылдар (KZ):</label>
                         <input type="file" name="media_kz" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
                     </div>
 
-                    <hr class="my-3 text-muted opacity-25">
+                    <hr class="my-3">
 
                     <!-- АНГЛИЙСКИЙ -->
                     <div class="fw-bold text-danger small mb-2">🇬🇧 English</div>
@@ -52,11 +220,16 @@
                         <textarea name="content_en" rows="2" class="form-control form-control-sm" placeholder="Text in English..."></textarea>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label text-muted" style="font-size: 0.75rem;">Files (EN):</label>
+                        <label class="form-label text-muted" style="font-size: 0.7rem;">Files (EN):</label>
                         <input type="file" name="media_en" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
                     </div>
 
-                    <button type="submit" class="btn btn-primary w-100 fw-medium mt-2" style="background-color: #0d6efd; border: none;">Опубликовать на всех языках</button>
+                    <button type="submit" class="btn btn-primary w-100 fw-medium mt-2" style="background-color: #0d6efd;">Опубликовать на всех языках</button>
                 </form>
             </div>
         </div>
+    </div>
+</main>
+
+</body>
+</html>
