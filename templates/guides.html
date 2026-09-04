@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart FAQ — Astana IT Helpdesk</title>
+    <title>База знаний — Astana IT Helpdesk</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <style>
@@ -118,10 +118,10 @@
         <a href="/admin/templates" class="nav-link-custom">
             <i class="bi bi-chat-left-dots-fill"></i> Шаблоны ответов
         </a>
-        <a href="/admin/smart-faq" class="nav-link-custom active">
+        <a href="/admin/smart-faq" class="nav-link-custom">
             <i class="bi bi-lightning-charge-fill"></i> Smart FAQ
         </a>
-        <a href="/admin/guides" class="nav-link-custom">
+        <a href="/admin/guides" class="nav-link-custom active">
             <i class="bi bi-book-fill"></i> База знаний
         </a>
         <a href="/admin/reports/export.xlsx" class="nav-link-custom text-success">
@@ -138,41 +138,27 @@
 </aside>
 
 <main class="content-area">
-    <div class="page-title">Smart FAQ (Авто-подсказки)</div>
-    <div class="page-desc">Бот автоматически отправляет решение студенту, если в тексте проблемы встречаются заданные ключевые слова.</div>
+    <div class="page-title">База знаний и инструкции</div>
+    <div class="page-desc">Текстовые памятки, которые отображаются в боте при нажатии на кнопку «📚 Инструкции и памятки».</div>
 
     <div class="row g-4">
         <div class="col-lg-7">
             <div class="card card-custom p-3">
-                <h6 class="fw-bold mb-3">Правила автоответа</h6>
-                {% if not rules %}
-                    <div class="text-muted small p-3 text-center">Правил нет. Добавьте первое правило в форме справа.</div>
+                <h6 class="fw-bold mb-3">Опубликованные памятки</h6>
+                {% if not guides %}
+                    <div class="text-muted small p-3 text-center">Инструкций пока нет. Добавьте первую памятку через форму справа.</div>
                 {% else %}
                     <div class="list-group list-group-flush">
-                        {% for r in rules %}
+                        {% for g in guides %}
                         <div class="list-group-item d-flex justify-content-between align-items-start px-2 py-3">
                             <div class="me-3">
-                                <div class="d-flex align-items-center gap-2">
-                                    <span class="fw-bold text-dark">{{ r.title }}</span>
-                                    {% if r.is_active %}
-                                        <span class="badge bg-success">Активно</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">Выключено</span>
-                                    {% endif %}
-                                </div>
-                                <div class="small text-primary mt-1">🔑 Ключи: {{ r.keywords }}</div>
-                                <div class="small text-muted mt-1" style="white-space: pre-line;">{{ r.reply_text }}</div>
+                                <span class="badge bg-light text-primary border mb-1">{{ g.module_name }}</span>
+                                <div class="fw-bold text-dark">{{ g.title }}</div>
+                                <div class="small text-muted mt-1" style="white-space: pre-line;">{{ g.content }}</div>
                             </div>
-                            <div class="d-flex gap-1">
-                                <form action="/admin/smart-faq/{{ r.id }}/toggle" method="post">
-                                    <button class="btn btn-sm btn-outline-secondary">
-                                        {{ 'Выкл' if r.is_active else 'Вкл' }}
-                                    </button>
-                                </form>
-                                <form action="/admin/smart-faq/{{ r.id }}/delete" method="post" onsubmit="return confirm('Удалить правило?');">
-                                    <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                                </form>
-                            </div>
+                            <form action="/admin/guides/{{ g.id }}/delete" method="post" onsubmit="return confirm('Удалить инструкцию?');">
+                                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                            </form>
                         </div>
                         {% endfor %}
                     </div>
@@ -182,21 +168,25 @@
 
         <div class="col-lg-5">
             <div class="card card-custom p-4">
-                <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить правило</h6>
-                <form action="/admin/smart-faq/add" method="post">
+                <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить инструкцию</h6>
+                <form action="/admin/guides/add" method="post">
                     <div class="mb-3">
-                        <label class="form-label small text-muted">Название правила:</label>
-                        <input type="text" name="title" class="form-control" placeholder="например: Забыли пароль" required>
+                        <label class="form-label small text-muted">Модуль (раздел):</label>
+                        <select name="module_name" class="form-select" required>
+                            {% for m in modules %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small text-muted">Ключевые слова (через запятую):</label>
-                        <input type="text" name="keywords" class="form-control" placeholder="пароль, сбросить, не могу войти" required>
+                        <label class="form-label small text-muted">Заголовок инструкции:</label>
+                        <input type="text" name="title" class="form-control" placeholder="например: Как запросить справку" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small text-muted">Текст автоматической подсказки:</label>
-                        <textarea name="reply_text" rows="4" class="form-control" placeholder="Инструкция для студента..." required></textarea>
+                        <label class="form-label small text-muted">Текст инструкции (поддерживается HTML):</label>
+                        <textarea name="content" rows="6" class="form-control" placeholder="Опишите шаги для студента..." required></textarea>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100 fw-medium" style="background-color: #0d6efd;">Сохранить правило</button>
+                    <button type="submit" class="btn btn-primary w-100 fw-medium" style="background-color: #0d6efd;">Опубликовать</button>
                 </form>
             </div>
         </div>

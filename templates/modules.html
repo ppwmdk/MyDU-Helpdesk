@@ -5,141 +5,200 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Модули — Astana IT Helpdesk</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <style>
         :root {
-            --sidebar-bg: #0f172a;
-            --sidebar-hover: #1e293b;
-            --main-bg: #f8fafc;
+            --sidebar-bg: #0c1322;
+            --sidebar-hover: #17233d;
+            --sidebar-active: #1d4ed8;
         }
-        body { background-color: var(--main-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .sidebar { background-color: var(--sidebar-bg); min-height: 100vh; color: #94a3b8; }
-        .sidebar .nav-link {
-            color: #94a3b8; font-weight: 500; padding: 10px 16px; border-radius: 8px; margin-bottom: 6px;
-            transition: all 0.2s ease; display: flex; align-items: center; text-decoration: none;
+        body {
+            background-color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         }
-        .sidebar .nav-link:hover { color: #ffffff; background-color: var(--sidebar-hover); }
-        .sidebar .nav-link.active { color: #ffffff; background-color: #1e293b; }
-        .sidebar .nav-link i { font-size: 1.1rem; margin-right: 12px; }
-        .brand-header { padding: 24px 16px 20px 16px; text-align: center; }
-        .brand-title { color: #ffffff; font-weight: 800; letter-spacing: 0.5px; margin-bottom: 2px; font-size: 1.05rem; }
-        .brand-subtitle { color: #38bdf8; font-weight: 700; letter-spacing: 1.5px; font-size: 0.75rem; }
-        .card { border: none; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .sidebar {
+            width: 250px;
+            background-color: var(--sidebar-bg);
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            min-height: 100vh;
+            padding: 24px 14px;
+        }
+        .sidebar-brand {
+            font-size: 1.05rem;
+            font-weight: 800;
+            text-align: center;
+            padding-bottom: 24px;
+            margin-bottom: 20px;
+        }
+        .sidebar-brand small {
+            display: block;
+            font-size: 0.7rem;
+            color: #38bdf8;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-top: 3px;
+        }
+        .nav-link-custom {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            color: #94a3b8;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+            transition: all 0.15s ease-in-out;
+        }
+        .nav-link-custom:hover {
+            background-color: var(--sidebar-hover);
+            color: #f1f5f9;
+        }
+        .nav-link-custom.active {
+            background-color: var(--sidebar-active);
+            color: #fff;
+        }
+        .sidebar-footer {
+            margin-top: auto;
+            padding-top: 16px;
+        }
+        .admin-meta {
+            font-size: 0.65rem;
+            color: #475569;
+            word-break: break-all;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .content-area {
+            flex-grow: 1;
+            padding: 32px 40px;
+            overflow-x: hidden;
+        }
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .page-desc {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 28px;
+        }
+        .card-custom {
+            background: #fff;
+            border: 1px solid #edf2f7;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
     </style>
 </head>
 <body>
-<div class="container-fluid p-0">
-    <div class="row g-0">
-        <!-- Боковая панель -->
-        <div class="col-auto col-md-3 col-lg-2 sidebar d-flex flex-column justify-content-between p-3">
-            <div>
-                <div class="brand-header border-bottom border-secondary border-opacity-25 mb-4">
-                    <div class="brand-title">ASTANA IT</div>
-                    <div class="brand-subtitle">HELP-DESK</div>
+
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        ASTANA IT
+        <small>HELP-DESK</small>
+    </div>
+
+    <nav class="d-flex flex-column flex-grow-1">
+        <a href="/admin" class="nav-link-custom">
+            <i class="bi bi-grid-fill"></i> Панель управления
+        </a>
+        <a href="/admin/modules" class="nav-link-custom active">
+            <i class="bi bi-tag-fill"></i> Модули
+        </a>
+        <a href="/admin/templates" class="nav-link-custom">
+            <i class="bi bi-chat-left-dots-fill"></i> Шаблоны ответов
+        </a>
+        <a href="/admin/smart-faq" class="nav-link-custom">
+            <i class="bi bi-lightning-charge-fill"></i> Smart FAQ
+        </a>
+        <a href="/admin/guides" class="nav-link-custom">
+            <i class="bi bi-book-fill"></i> База знаний
+        </a>
+        <a href="/admin/reports/export.xlsx" class="nav-link-custom text-success">
+            <i class="bi bi-file-earmark-excel-fill"></i> Выгрузить Excel
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="admin-meta">Вы вошли как:<br>{{ admin_username }}</div>
+        <form action="/admin/logout" method="post" class="m-0">
+            <button class="btn btn-danger w-100 btn-sm py-1 fw-medium" style="background-color: #ef4444; border: none;">Выйти</button>
+        </form>
+    </div>
+</aside>
+
+<main class="content-area">
+    <div class="page-title">Управление модулями (категориями)</div>
+    <div class="page-desc">Добавляйте и выключайте модули, которые отображаются у студентов в Telegram-боте.</div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card card-custom p-3">
+                <h6 class="fw-bold mb-3">Существующие модули</h6>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="60">ID</th>
+                                <th>Название модуля</th>
+                                <th width="120">Статус</th>
+                                <th width="160" class="text-end">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for m in modules %}
+                            <tr>
+                                <td class="text-muted fw-bold">#{{ m.id }}</td>
+                                <td class="fw-medium">{{ m.name }}</td>
+                                <td>
+                                    {% if m.is_active %}
+                                        <span class="badge bg-success">Активен</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Отключен</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <form action="/admin/modules/{{ m.id }}/toggle" method="post" class="d-inline">
+                                        <button class="btn btn-sm btn-outline-secondary">
+                                            {{ 'Выключить' if m.is_active else 'Включить' }}
+                                        </button>
+                                    </form>
+                                    <form action="/admin/modules/{{ m.id }}/delete" method="post" class="d-inline" onsubmit="return confirm('Удалить модуль?');">
+                                        <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
-
-                <ul class="nav nav-pills flex-column mb-auto">
-                    <li class="nav-item">
-                        <a href="/admin" class="nav-link">
-                            <i class="bi bi-grid-fill"></i>
-                            <span>Панель управления</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/admin/modules" class="nav-link active">
-                            <i class="bi bi-tags-fill"></i>
-                            <span>Модули</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/admin/templates" class="nav-link">
-                            <i class="bi bi-chat-left-quote-fill"></i>
-                            <span>Шаблоны ответов</span>
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/admin/smart-faq" class="nav-link">
-                            <i class="bi bi-lightning-charge-fill"></i>
-                            <span>Smart FAQ</span>
-                        </a>
-                    </li>
-                    <li class="nav-item mt-2">
-                        <a href="/admin/reports/export.xlsx" class="nav-link text-success">
-                            <i class="bi bi-file-earmark-excel-fill"></i>
-                            <span>Выгрузить Excel</span>
-                        </a>
-                    </li>
-                </ul>
             </div>
+        </div>
 
-            <div class="pt-4 border-top border-secondary border-opacity-25 text-center">
-                <div class="small text-muted mb-2">Вы вошли как:<br><span class="text-white fw-semibold">{{ admin_username }}</span></div>
-                <form method="POST" action="/admin/logout">
-                    <button type="submit" class="btn btn-danger btn-sm w-100">Выйти</button>
+        <div class="col-lg-5">
+            <div class="card card-custom p-4">
+                <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить модуль</h6>
+                <form action="/admin/modules/add" method="post">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Название модуля:</label>
+                        <input type="text" name="name" class="form-control" placeholder="например: Расписание" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 fw-medium" style="background-color: #0d6efd;">Создать модуль</button>
                 </form>
             </div>
         </div>
-
-        <!-- Основной контент -->
-        <div class="col min-vh-100 p-4">
-            <h3 class="fw-bold mb-1">Управление модулями (категориями)</h3>
-            <p class="text-muted mb-4">Добавляйте и выключайте модули, которые отображаются у студентов в Telegram-боте.</p>
-
-            <div class="row g-4">
-                <div class="col-lg-8">
-                    <div class="card p-4 bg-white">
-                        <h5 class="fw-bold mb-3">Существующие модули</h5>
-                        <table class="table table-hover align-middle">
-                            <thead class="table-light">
-                                <tr>
-                                    <th style="width: 60px;">ID</th>
-                                    <th>Название модуля</th>
-                                    <th>Статус</th>
-                                    <th class="text-end">Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for m in modules %}
-                                <tr>
-                                    <td class="text-muted">{{ m.id }}</td>
-                                    <td class="fw-semibold">{{ m.name }}</td>
-                                    <td>
-                                        {% if m.is_active %}
-                                        <span class="badge bg-success-subtle text-success border border-success-subtle">Активен</span>
-                                        {% else %}
-                                        <span class="badge bg-secondary-subtle text-secondary border">Отключен</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-end">
-                                        <form method="POST" action="/admin/modules/{{ m.id }}/toggle" class="d-inline">
-                                            <button class="btn btn-sm btn-outline-secondary">{{ 'Выключить' if m.is_active else 'Включить' }}</button>
-                                        </form>
-                                        <form method="POST" action="/admin/modules/{{ m.id }}/delete" class="d-inline" onsubmit="return confirm('Удалить модуль?');">
-                                            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                                        </form>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="col-lg-4">
-                    <div class="card p-4 bg-white">
-                        <h5 class="fw-bold mb-3">➕ Добавить модуль</h5>
-                        <form method="POST" action="/admin/modules/add">
-                            <div class="mb-3">
-                                <label class="form-label small text-muted fw-bold">Название модуля:</label>
-                                <input type="text" name="name" class="form-control" placeholder="например: Расписание" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">Создать модуль</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
-</div>
+</main>
+
 </body>
 </html>
