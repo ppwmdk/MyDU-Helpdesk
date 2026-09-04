@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, Form, HTTPException, status, UploadFile, F
 import shutil
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
-from aiogram.types import InputFile, MediaGroup
+
 
 from telegram import (
     Update,
