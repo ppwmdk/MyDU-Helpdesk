@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, Form, HTTPException, status, UploadFile, F
 import shutil
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
+from aiogram.types import InputFile, MediaGroup
 
 from telegram import (
     Update,
@@ -779,7 +780,7 @@ async def report_detail(request: Request, report_id: int):
             if not report:
                 raise HTTPException(status_code=404, detail="Ticket not found")
 
-            await cursor.execute("SELECT * FROM report_messages WHERE report_id = %s ORDER BY id ASC;", (report_id,))
+            await cursor.execute("SELECT * FROM report_messages WHERE report_id = %s ORDER BY report_id ASC;", (report_id,))
             chat_messages = await cursor.fetchall()
 
             await cursor.execute("SELECT title, text FROM quick_templates ORDER BY id ASC;")
