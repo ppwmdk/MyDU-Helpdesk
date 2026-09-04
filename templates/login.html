@@ -1,38 +1,91 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Вход в админ-панель</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/admin.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход в панель управления — Astana IT Helpdesk</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0c1322;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .login-card {
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            width: 100%;
+            max-width: 420px;
+            padding: 36px 32px;
+        }
+        .brand-title {
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: #0c1322;
+            text-align: center;
+            letter-spacing: 0.5px;
+        }
+        .brand-subtitle {
+            font-size: 0.75rem;
+            color: #0284c7;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .form-control {
+            border-radius: 8px;
+            padding: 10px 14px;
+            border: 1px solid #cbd5e1;
+        }
+        .form-control:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+        .btn-login {
+            background-color: #0d6efd;
+            border: none;
+            border-radius: 8px;
+            padding: 11px;
+            font-weight: 600;
+            width: 100%;
+            margin-top: 8px;
+        }
+        .btn-login:hover {
+            background-color: #1d4ed8;
+        }
+    </style>
 </head>
-<body class="login-page">
-    <main class="login-panel">
-        <h1>Вход</h1>
+<body>
 
-        {% if not configured %}
-            <p class="alert error">
-                Добавьте ADMIN_PANEL_PASSWORD в .env на сервере и перезапустите приложение.
-            </p>
-        {% endif %}
+<div class="login-card">
+    <div class="brand-title">ASTANA IT UNIVERSITY</div>
+    <div class="brand-subtitle">HELPDESK PANEL</div>
 
-        {% if request.query_params.get('error') == '1' %}
-            <p class="alert error">Неверный логин или пароль.</p>
-        {% elif request.query_params.get('error') == 'config' %}
-            <p class="alert error">Пароль для панели ещё не настроен.</p>
-        {% endif %}
+    {% if error %}
+    <div class="alert alert-danger py-2 px-3 small text-center mb-3 border-0 rounded-3">
+        {{ error }}
+    </div>
+    {% endif %}
 
-        <form method="post" action="/admin/login" class="stack">
-            <label>
-                Логин
-                <input name="username" value="{{ username }}" autocomplete="username" required>
-            </label>
-            <label>
-                Пароль
-                <input name="password" type="password" autocomplete="current-password" required>
-            </label>
-            <button type="submit" class="primary-button">Войти</button>
-        </form>
-    </main>
+    <form action="/admin/login" method="post">
+        <div class="mb-3">
+            <label class="form-label small fw-semibold text-muted">Логин</label>
+            <input type="text" name="username" class="form-control" placeholder="admin" required autofocus>
+        </div>
+        <div class="mb-4">
+            <label class="form-label small fw-semibold text-muted">Пароль</label>
+            <input type="password" name="password" class="form-control" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-login">Войти в систему</button>
+    </form>
+</div>
+
 </body>
 </html>
