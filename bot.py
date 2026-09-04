@@ -10,7 +10,8 @@ from psycopg.rows import dict_row
 import openpyxl
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Request, Form, HTTPException, status
+from fastapi import FastAPI, Request, Form, HTTPException, status, UploadFile, File
+import shutil
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -1062,15 +1063,55 @@ async def guides_page(request: Request):
     })
 
 @app.post("/admin/guides/add")
-async def add_guide(request: Request, module_name: str = Form(...), title: str = Form(...), content: str = Form(...)):
+async def add_guide(
+    request: Request,
+    module_name: str = Form(...),
+    title: str = Form(...),
+    content: str = Form(""),
+    media_files: List[UploadFile] = File(None)
+):
     if not get_admin_username(request):
         return admin_redirect()
+
+    # 1. Сохраняем текстовую инструкцию в базу данных
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 "INSERT INTO module_guides (module_name, title, content) VALUES (%s, %s, %s);",
-                (module_name, title.strip(), content.strip())
+                (module_name, title.strip(), content.strip() or "Инструкция в прикрепленном файле")
             )
+
+    # 2. Если прикреплены файлы (фото или PDF)
+    if media_files and any(f.filename for f in media_files):
+        folder_name = "dorm" if "общежитие" in module_name.lower() else "registration"
+        target_dir = os.path.join(MEDIA_BASE_PATH, folder_name, "ru")
+        os.makedirs(target_dir, exist_ok=True)
+
+        # Очищаем старые файлы и кэш
+        for old_f in os.listdir(target_dir):
+            old_p = os.path.join(target_dir, old_f)
+            if os.path.isfile(old_p):
+                os.remove(old_p)
+        MEDIA_CACHE.pop(f"{folder_name}:ru", None)
+
+        img_idx = 1
+        for file_obj in media_files:
+            if not file_obj.filename:
+                continue
+            fname = file_obj.filename.lower()
+
+            if fname.endswith(".pdf"):
+                dest_path = os.path.join(target_dir, "guide.pdf")
+            elif fname.endswith((".png", ".jpg", ".jpeg")):
+                ext = os.path.splitext(fname)[1]
+                dest_path = os.path.join(target_dir, f"{img_idx}{ext}")
+                img_idx += 1
+            else:
+                continue
+
+            with open(dest_path, "wb") as buffer:
+                shutil.copyfileobj(file_obj.file, buffer)
+
     return RedirectResponse(url="/admin/guides", status_code=303)
 
 @app.post("/admin/guides/{gid}/delete")

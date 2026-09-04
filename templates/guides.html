@@ -169,7 +169,7 @@
         <div class="col-lg-5">
             <div class="card card-custom p-4">
                 <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить инструкцию</h6>
-                <form action="/admin/guides/add" method="post">
+                <form action="/admin/guides/add" method="post" enctype="multipart/form-data">
                     <div class="mb-3">
                         <label class="form-label small text-muted">Модуль (раздел):</label>
                         <select name="module_name" class="form-select" required>
@@ -180,11 +180,16 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label small text-muted">Заголовок инструкции:</label>
-                        <input type="text" name="title" class="form-control" placeholder="например: Как запросить справку" required>
+                        <input type="text" name="title" class="form-control" placeholder="например: Заселение в общежитие" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small text-muted">Текст инструкции (поддерживается HTML):</label>
-                        <textarea name="content" rows="6" class="form-control" placeholder="Опишите шаги для студента..." required></textarea>
+                        <label class="form-label small text-muted">Текст инструкции (опционально):</label>
+                        <textarea name="content" rows="4" class="form-control" placeholder="Опишите шаги для студента..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Прикрепить файлы (PDF или пачка изображений):</label>
+                        <input type="file" name="media_files" class="form-control" accept=".pdf, .png, .jpg, .jpeg" multiple>
+                        <div class="form-text" style="font-size: 0.75rem;">Можно выбрать один PDF или сразу несколько изображений.</div>
                     </div>
                     <button type="submit" class="btn btn-primary w-100 fw-medium" style="background-color: #0d6efd;">Опубликовать</button>
                 </form>
