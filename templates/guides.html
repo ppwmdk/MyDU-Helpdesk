@@ -1,62 +1,62 @@
 <div class="col-lg-5">
-    <div class="card card-custom p-4">
-        <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить инструкцию (3 языка)</h6>
-        <form action="/admin/guides/add" method="post" enctype="multipart/form-data">
-            <div class="mb-3">
-                <label class="form-label small text-muted">Модуль (раздел):</label>
-                <select name="module_name" class="form-select" required>
-                    {% for m in modules %}
-                    <option value="{{ m }}">{{ m }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            
-            <hr class="my-3">
+            <div class="card card-custom p-4 shadow-sm border-0">
+                <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-plus-circle-fill text-primary me-1"></i> Добавить инструкцию (3 языка)</h6>
+                <form action="/admin/guides/add" method="post" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted fw-semibold">Модуль (раздел):</label>
+                        <select name="module_name" class="form-select" required>
+                            {% for m in modules %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <hr class="my-3 text-muted opacity-25">
 
-            <!-- РУССКИЙ -->
-            <div class="fw-bold text-primary small mb-2">🇷🇺 Русский язык</div>
-            <div class="mb-2">
-                <input type="text" name="title_ru" class="form-control form-control-sm" placeholder="Заголовок на русском">
-            </div>
-            <div class="mb-2">
-                <textarea name="content_ru" rows="2" class="form-control form-control-sm" placeholder="Текст на русском..."></textarea>
-            </div>
-            <div class="mb-3">
-                <label class="form-label text-muted" style="font-size: 0.7rem;">Файлы (RU):</label>
-                <input type="file" name="media_ru" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
-            </div>
+                    <!-- РУССКИЙ -->
+                    <div class="fw-bold text-primary small mb-2">🇷🇺 Русский язык</div>
+                    <div class="mb-2">
+                        <input type="text" name="title_ru" class="form-control form-control-sm" placeholder="Заголовок на русском">
+                    </div>
+                    <div class="mb-2">
+                        <textarea name="content_ru" rows="2" class="form-control form-control-sm" placeholder="Текст на русском..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted" style="font-size: 0.75rem;">Файлы (RU):</label>
+                        <input type="file" name="media_ru" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
+                    </div>
 
-            <hr class="my-3">
+                    <hr class="my-3 text-muted opacity-25">
 
-            <!-- КАЗАХСКИЙ -->
-            <div class="fw-bold text-success small mb-2">🇰🇿 Қазақ тілі</div>
-            <div class="mb-2">
-                <input type="text" name="title_kz" class="form-control form-control-sm" placeholder="Қазақша тақырып">
-            </div>
-            <div class="mb-2">
-                <textarea name="content_kz" rows="2" class="form-control form-control-sm" placeholder="Қазақша мәтін..."></textarea>
-            </div>
-            <div class="mb-3">
-                <label class="form-label text-muted" style="font-size: 0.7rem;">Файылдар (KZ):</label>
-                <input type="file" name="media_kz" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
-            </div>
+                    <!-- КАЗАХСКИЙ -->
+                    <div class="fw-bold text-success small mb-2">🇰🇿 Қазақ тілі</div>
+                    <div class="mb-2">
+                        <input type="text" name="title_kz" class="form-control form-control-sm" placeholder="Қазақша тақырып">
+                    </div>
+                    <div class="mb-2">
+                        <textarea name="content_kz" rows="2" class="form-control form-control-sm" placeholder="Қазақша мәтін..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted" style="font-size: 0.75rem;">Файылдар (KZ):</label>
+                        <input type="file" name="media_kz" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
+                    </div>
 
-            <hr class="my-3">
+                    <hr class="my-3 text-muted opacity-25">
 
-            <!-- АНГЛИЙСКИЙ -->
-            <div class="fw-bold text-danger small mb-2">🇬🇧 English</div>
-            <div class="mb-2">
-                <input type="text" name="title_en" class="form-control form-control-sm" placeholder="Title in English">
-            </div>
-            <div class="mb-2">
-                <textarea name="content_en" rows="2" class="form-control form-control-sm" placeholder="Text in English..."></textarea>
-            </div>
-            <div class="mb-3">
-                <label class="form-label text-muted" style="font-size: 0.7rem;">Files (EN):</label>
-                <input type="file" name="media_en" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
-            </div>
+                    <!-- АНГЛИЙСКИЙ -->
+                    <div class="fw-bold text-danger small mb-2">🇬🇧 English</div>
+                    <div class="mb-2">
+                        <input type="text" name="title_en" class="form-control form-control-sm" placeholder="Title in English">
+                    </div>
+                    <div class="mb-2">
+                        <textarea name="content_en" rows="2" class="form-control form-control-sm" placeholder="Text in English..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted" style="font-size: 0.75rem;">Files (EN):</label>
+                        <input type="file" name="media_en" class="form-control form-control-sm" accept=".pdf, .png, .jpg, .jpeg" multiple>
+                    </div>
 
-            <button type="submit" class="btn btn-primary w-100 fw-medium mt-2" style="background-color: #0d6efd;">Опубликовать на всех языках</button>
-        </form>
-    </div>
-</div>
+                    <button type="submit" class="btn btn-primary w-100 fw-medium mt-2" style="background-color: #0d6efd; border: none;">Опубликовать на всех языках</button>
+                </form>
+            </div>
+        </div>
