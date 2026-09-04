@@ -1066,51 +1066,69 @@ async def guides_page(request: Request):
 async def add_guide(
     request: Request,
     module_name: str = Form(...),
-    title: str = Form(...),
-    content: str = Form(""),
-    media_files: List[UploadFile] = File(None)
+    title_ru: str = Form(""),
+    content_ru: str = Form(""),
+    media_ru: List[UploadFile] = File(None),
+    title_kz: str = Form(""),
+    content_kz: str = Form(""),
+    media_kz: List[UploadFile] = File(None),
+    title_en: str = Form(""),
+    content_en: str = Form(""),
+    media_en: List[UploadFile] = File(None),
 ):
     if not get_admin_username(request):
         return admin_redirect()
 
-    # 1. Сохраняем текстовую инструкцию в базу данных
+    folder_name = "dorm" if "общежитие" in module_name.lower() else "registration"
+
+    # Словарь языков для обработки
+    languages = {
+        "ru": (title_ru, content_ru, media_ru),
+        "kz": (title_kz, content_kz, media_kz),
+        "en": (title_en, content_en, media_en),
+    }
+
     async with await get_conn_async() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(
-                "INSERT INTO module_guides (module_name, title, content) VALUES (%s, %s, %s);",
-                (module_name, title.strip(), content.strip() or "Инструкция в прикрепленном файле")
-            )
+            for lang, (title, content, media_files) in languages.items():
+                if not title.strip() and not content.strip() and not (media_files and any(f.filename for f in media_files)):
+                    continue  # Если язык не заполнен, пропускаем
 
-    # 2. Если прикреплены файлы (фото или PDF)
-    if media_files and any(f.filename for f in media_files):
-        folder_name = "dorm" if "общежитие" in module_name.lower() else "registration"
-        target_dir = os.path.join(MEDIA_BASE_PATH, folder_name, "ru")
-        os.makedirs(target_dir, exist_ok=True)
+                # 1. Сохраняем инструкцию для конкретного языка в БД
+                await cursor.execute(
+                    "INSERT INTO module_guides (module_name, title, content, language) VALUES (%s, %s, %s, %s);",
+                    (module_name, title.strip() or f"Инструкция ({lang})", content.strip() or "Инструкция в прикрепленном файле", lang)
+                )
 
-        # Очищаем старые файлы и кэш
-        for old_f in os.listdir(target_dir):
-            old_p = os.path.join(target_dir, old_f)
-            if os.path.isfile(old_p):
-                os.remove(old_p)
-        MEDIA_CACHE.pop(f"{folder_name}:ru", None)
+                # 2. Сохраняем медиафайлы для этого языка, если они есть
+                if media_files and any(f.filename for f in media_files):
+                    target_dir = os.path.join(MEDIA_BASE_PATH, folder_name, lang)
+                    os.makedirs(target_dir, exist_ok=True)
 
-        img_idx = 1
-        for file_obj in media_files:
-            if not file_obj.filename:
-                continue
-            fname = file_obj.filename.lower()
+                    # Очищаем старые файлы для этого языка
+                    for old_f in os.listdir(target_dir):
+                        old_p = os.path.join(target_dir, old_f)
+                        if os.path.isfile(old_p):
+                            os.remove(old_p)
+                    MEDIA_CACHE.pop(f"{folder_name}:{lang}", None)
 
-            if fname.endswith(".pdf"):
-                dest_path = os.path.join(target_dir, "guide.pdf")
-            elif fname.endswith((".png", ".jpg", ".jpeg")):
-                ext = os.path.splitext(fname)[1]
-                dest_path = os.path.join(target_dir, f"{img_idx}{ext}")
-                img_idx += 1
-            else:
-                continue
+                    img_idx = 1
+                    for file_obj in media_files:
+                        if not file_obj.filename:
+                            continue
+                        fname = file_obj.filename.lower()
 
-            with open(dest_path, "wb") as buffer:
-                shutil.copyfileobj(file_obj.file, buffer)
+                        if fname.endswith(".pdf"):
+                            dest_path = os.path.join(target_dir, "guide.pdf")
+                        elif fname.endswith((".png", ".jpg", ".jpeg")):
+                            ext = os.path.splitext(fname)[1]
+                            dest_path = os.path.join(target_dir, f"{img_idx}{ext}")
+                            img_idx += 1
+                        else:
+                            continue
+
+                        with open(dest_path, "wb") as buffer:
+                            shutil.copyfileobj(file_obj.file, buffer)
 
     return RedirectResponse(url="/admin/guides", status_code=303)
 
